@@ -19,3 +19,8 @@ public sealed record GameStartMessage() : WebRtcMessage("gameStart");
 /// 対局者指定付きゲーム開始メッセージ
 /// </summary>
 public sealed record GameStartWithPlayersMessage(string SentePeerId, string GotePeerId) : WebRtcMessage("gameStartWithPlayers");
+
+/// <summary>
+/// 投了メッセージ
+/// </summary>
+public sealed record ResignMessage() : WebRtcMessage("resign");

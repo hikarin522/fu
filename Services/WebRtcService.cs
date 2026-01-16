@@ -45,6 +45,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public event Func<Participant, Task>? OnParticipantJoined;
     public event Func<string, Task>? OnParticipantLeft;
     public event Func<GameStartInfo, Task>? OnGameStartWithPlayers;
+    public event Func<Task>? OnResignReceived;
 
     public async Task InitializeAsync()
     {
@@ -88,6 +89,13 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public async Task SendGameStartAsync()
     {
         var message = new GameStartMessage();
+        var json = JsonSerializer.Serialize(message, JsonConfig.Options);
+        await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
+    }
+
+    public async Task SendResignAsync()
+    {
+        var message = new ResignMessage();
         var json = JsonSerializer.Serialize(message, JsonConfig.Options);
         await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
@@ -181,6 +189,12 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                         var senteNickname = this._participants.GetValueOrDefault(gsMessage.SentePeerId)?.Nickname ?? "先手";
                         var goteNickname = this._participants.GetValueOrDefault(gsMessage.GotePeerId)?.Nickname ?? "後手";
                         await gsHandler(new GameStartInfo(gsMessage.SentePeerId, gsMessage.GotePeerId, senteNickname, goteNickname));
+                    }
+                    break;
+
+                case "resign":
+                    if (OnResignReceived is { } resignHandler) {
+                        await resignHandler();
                     }
                     break;
             }

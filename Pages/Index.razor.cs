@@ -39,6 +39,7 @@ public partial class Index : IAsyncDisposable
             this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
             this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
             this.WebRtcService.OnGameStartWithPlayers += this.OnGameStartWithPlayersAsync;
+            this.WebRtcService.OnResignReceived += this.OnRemoteResignReceivedAsync;
             this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
         }
         catch (Exception ex) {
@@ -145,7 +146,17 @@ public partial class Index : IAsyncDisposable
         this.ShowNewGameDialog = false;
     }
 
-    private Task ResignAsync() => this.GameService.ResignAsync();
+    private async Task ResignAsync()
+    {
+        await this.GameService.ResignAsync();
+        await this.WebRtcService.SendResignAsync();
+    }
+
+    private async Task OnRemoteResignReceivedAsync()
+    {
+        await this.GameService.ResignAsync();
+        await this.InvokeAsync(this.StateHasChanged);
+    }
 
     private async Task DownloadKifAsync()
     {
@@ -168,6 +179,7 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnGameStart -= this.OnRemoteGameStartAsync;
         this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReadyAsync;
         this.WebRtcService.OnGameStartWithPlayers -= this.OnGameStartWithPlayersAsync;
+        this.WebRtcService.OnResignReceived -= this.OnRemoteResignReceivedAsync;
         this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
         await this.WebRtcService.DisposeAsync();
         GC.SuppressFinalize(this);
