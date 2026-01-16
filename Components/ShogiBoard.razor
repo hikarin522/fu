@@ -1,0 +1,231 @@
+@using ShogiGame.Models
+@using ShogiGame.Services
+
+<div class="shogi-container">
+    <CapturedPiecesPanel
+        Pieces="@(IsFlipped ? State.SenteCaptured : State.GoteCaptured)"
+        Player="@(IsFlipped ? Player.Sente : Player.Gote)"
+        IsOpponent="true"
+        OnPieceSelected="OnCapturedPieceClick"
+        SelectedPiece="@(IsSelectingDropTarget ? SelectedDropPiece : null)" />
+
+    <div class="board-wrapper">
+        <div class="col-labels top">
+            @for (int c = 0; c < 9; c++)
+            {
+                var col = IsFlipped ? c : 8 - c;
+                <span>@(col + 1)</span>
+            }
+        </div>
+
+        <div class="board-with-rows">
+            <div class="row-labels">
+                @{
+                    var rowChars = new[] { "一", "二", "三", "四", "五", "六", "七", "八", "九" };
+                }
+                @for (int r = 0; r < 9; r++)
+                {
+                    var row = IsFlipped ? 8 - r : r;
+                    <span>@rowChars[row]</span>
+                }
+            </div>
+
+            <div class="board" @onclick="OnBoardClick" @onclick:stopPropagation="true">
+                @for (int r = 0; r < 9; r++)
+                {
+                    var displayRow = IsFlipped ? 8 - r : r;
+                    <div class="board-row">
+                        @for (int c = 0; c < 9; c++)
+                        {
+                            var displayCol = IsFlipped ? c : 8 - c;
+                            var pos = new Position(displayCol, displayRow);
+                            var piece = State.Board[pos];
+                            var isSelected = SelectedPosition == pos;
+                            var isLegalMove = LegalMoves.Contains(pos);
+                            var isLastMove = IsLastMovePosition(pos);
+
+                            <div class="cell @(isSelected ? "selected" : "") @(isLegalMove ? "legal-move" : "") @(isLastMove ? "last-move" : "")"
+                                 data-col="@displayCol" data-row="@displayRow"
+                                 @onclick="() => OnCellClick(pos)" @onclick:stopPropagation="true">
+                                @if (piece != null)
+                                {
+                                    <div class="piece @(piece.Owner == Player.Gote ? "gote" : "") @(piece.IsPromoted ? "promoted" : "")">
+                                        @piece.GetDisplayChar()
+                                    </div>
+                                }
+                                @if (isLegalMove && piece == null)
+                                {
+                                    <div class="move-indicator"></div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <CapturedPiecesPanel
+        Pieces="@(IsFlipped ? State.GoteCaptured : State.SenteCaptured)"
+        Player="@(IsFlipped ? Player.Gote : Player.Sente)"
+        IsOpponent="false"
+        OnPieceSelected="OnCapturedPieceClick"
+        SelectedPiece="@(IsSelectingDropTarget ? SelectedDropPiece : null)" />
+</div>
+
+@if (ShowPromotionDialog)
+{
+    <div class="promotion-dialog-overlay" @onclick="() => ShowPromotionDialog = false">
+        <div class="promotion-dialog" @onclick:stopPropagation="true">
+            <p>成りますか？</p>
+            <button @onclick="() => CompleteMove(true)">成る</button>
+            <button @onclick="() => CompleteMove(false)">不成</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public GameState State { get; set; } = new();
+    [Parameter] public ShogiGameService GameService { get; set; } = null!;
+    [Parameter] public EventCallback<Move> OnMoveMade { get; set; }
+    [Parameter] public bool IsFlipped { get; set; }
+
+    private Position? SelectedPosition { get; set; }
+    private List<Position> LegalMoves { get; set; } = new();
+    private bool ShowPromotionDialog { get; set; }
+    private Position? PendingMoveFrom { get; set; }
+    private Position? PendingMoveTo { get; set; }
+
+    private bool IsSelectingDropTarget { get; set; }
+    private PieceType? SelectedDropPiece { get; set; }
+    private List<Position> DropLegalMoves { get; set; } = new();
+
+    private void OnCellClick(Position pos)
+    {
+        if (State.Status != GameStatus.Playing || !State.IsMyTurn)
+            return;
+
+        // 持ち駒を選択中の場合
+        if (IsSelectingDropTarget && SelectedDropPiece.HasValue)
+        {
+            if (DropLegalMoves.Contains(pos))
+            {
+                var move = Move.CreateDrop(pos, SelectedDropPiece.Value, State.CurrentPlayer);
+                ExecuteMove(move);
+            }
+            ClearSelection();
+            return;
+        }
+
+        // 既に駒を選択済みで、合法手の位置をクリックした場合
+        if (SelectedPosition.HasValue && LegalMoves.Contains(pos))
+        {
+            var from = SelectedPosition.Value;
+            var piece = State.Board[from];
+
+            if (piece != null && GameService.CanPromote(from, pos))
+            {
+                if (GameService.MustPromote(from, pos))
+                {
+                    // 強制成り
+                    var move = new Move(from, pos, piece.Type, true) { Player = State.CurrentPlayer };
+                    ExecuteMove(move);
+                    ClearSelection();
+                }
+                else
+                {
+                    // 成り選択ダイアログ表示
+                    PendingMoveFrom = from;
+                    PendingMoveTo = pos;
+                    ShowPromotionDialog = true;
+                }
+            }
+            else
+            {
+                var move = new Move(from, pos, piece!.Type, false) { Player = State.CurrentPlayer };
+                ExecuteMove(move);
+                ClearSelection();
+            }
+            return;
+        }
+
+        // 自分の駒をクリックした場合
+        var clickedPiece = State.Board[pos];
+        if (clickedPiece != null && clickedPiece.Owner == State.CurrentPlayer)
+        {
+            SelectedPosition = pos;
+            LegalMoves = GameService.GetLegalMoves(pos);
+            IsSelectingDropTarget = false;
+            SelectedDropPiece = null;
+        }
+        else
+        {
+            ClearSelection();
+        }
+    }
+
+    private void OnCapturedPieceClick(PieceType pieceType)
+    {
+        if (State.Status != GameStatus.Playing || !State.IsMyTurn)
+            return;
+
+        var captured = State.GetCapturedPieces(State.CurrentPlayer);
+        if (captured.GetCount(pieceType) <= 0)
+            return;
+
+        IsSelectingDropTarget = true;
+        SelectedDropPiece = pieceType;
+        DropLegalMoves = GameService.GetLegalDropPositions(pieceType);
+        LegalMoves = DropLegalMoves;
+        SelectedPosition = null;
+    }
+
+    private void CompleteMove(bool promote)
+    {
+        ShowPromotionDialog = false;
+
+        if (PendingMoveFrom.HasValue && PendingMoveTo.HasValue)
+        {
+            var piece = State.Board[PendingMoveFrom.Value];
+            var move = new Move(PendingMoveFrom.Value, PendingMoveTo.Value, piece!.Type, promote)
+            {
+                Player = State.CurrentPlayer
+            };
+            ExecuteMove(move);
+        }
+
+        ClearSelection();
+    }
+
+    private async void ExecuteMove(Move move)
+    {
+        if (GameService.TryMakeMove(move))
+        {
+            await OnMoveMade.InvokeAsync(move);
+        }
+    }
+
+    private void ClearSelection()
+    {
+        SelectedPosition = null;
+        LegalMoves.Clear();
+        PendingMoveFrom = null;
+        PendingMoveTo = null;
+        IsSelectingDropTarget = false;
+        SelectedDropPiece = null;
+        DropLegalMoves.Clear();
+    }
+
+    private void OnBoardClick()
+    {
+        // クリックが盤面の外側だった場合は選択解除
+        ClearSelection();
+    }
+
+    private bool IsLastMovePosition(Position pos)
+    {
+        if (State.MoveHistory.Count == 0) return false;
+        var lastMove = State.MoveHistory[^1];
+        return lastMove.To == pos || (lastMove.From.HasValue && lastMove.From.Value == pos);
+    }
+}

@@ -1,0 +1,30 @@
+## .NET
+bin/
+obj/
+publish/
+
+## Visual Studio
+.vs/
+*.user
+*.userosscache
+*.suo
+
+## JetBrains Rider
+.idea/
+
+## VS Code
+.vscode/
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+## NuGet
+*.nupkg
+**/packages/*
+
+## OS
+.DS_Store
+Thumbs.db

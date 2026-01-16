@@ -1,0 +1,60 @@
+@using ShogiGame.Models
+
+<div class="captured-pieces @(IsOpponent ? "opponent" : "player")">
+    <div class="captured-label">@(IsOpponent ? "相手の持ち駒" : "自分の持ち駒")</div>
+    <div class="captured-list">
+        @foreach (var pieceType in PieceOrder)
+        {
+            var count = Pieces.GetCount(pieceType);
+            if (count > 0)
+            {
+                var isSelected = SelectedPiece == pieceType;
+                <div class="captured-piece @(isSelected ? "selected" : "") @(IsOpponent ? "" : "clickable")"
+                     @onclick="() => OnClick(pieceType)">
+                    <span class="piece-char @(IsOpponent ? "gote" : "")">@GetPieceChar(pieceType)</span>
+                    @if (count > 1)
+                    {
+                        <span class="piece-count">@count</span>
+                    }
+                </div>
+            }
+        }
+        @if (!Pieces.GetAll().Any())
+        {
+            <div class="no-pieces">なし</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public CapturedPieces Pieces { get; set; } = new();
+    [Parameter] public Player Player { get; set; }
+    [Parameter] public bool IsOpponent { get; set; }
+    [Parameter] public EventCallback<PieceType> OnPieceSelected { get; set; }
+    [Parameter] public PieceType? SelectedPiece { get; set; }
+
+    private static readonly PieceType[] PieceOrder = {
+        PieceType.Rook, PieceType.Bishop, PieceType.Gold, PieceType.Silver,
+        PieceType.Knight, PieceType.Lance, PieceType.Pawn
+    };
+
+    private async Task OnClick(PieceType pieceType)
+    {
+        if (!IsOpponent)
+        {
+            await OnPieceSelected.InvokeAsync(pieceType);
+        }
+    }
+
+    private string GetPieceChar(PieceType type) => type switch
+    {
+        PieceType.Rook => "飛",
+        PieceType.Bishop => "角",
+        PieceType.Gold => "金",
+        PieceType.Silver => "銀",
+        PieceType.Knight => "桂",
+        PieceType.Lance => "香",
+        PieceType.Pawn => "歩",
+        _ => ""
+    };
+}

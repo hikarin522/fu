@@ -1,0 +1,152 @@
+@page "/"
+@using ShogiGame.Models
+@using ShogiGame.Services
+@using ShogiGame.Components
+@inject ShogiGameService GameService
+@inject WebRtcService WebRtcService
+@implements IDisposable
+
+<div class="game-page">
+    <header class="game-header">
+        <h1>将棋オンライン対戦</h1>
+        <div class="game-info">
+            @if (GameService.State.Status == GameStatus.Playing)
+            {
+                <span class="turn-indicator @(GameService.State.IsMyTurn ? "my-turn" : "opponent-turn")">
+                    @(GameService.State.IsMyTurn ? "あなたの番です" : "相手の番です")
+                </span>
+                @if (GameService.IsInCheck())
+                {
+                    <span class="check-indicator">王手！</span>
+                }
+            }
+            @if (GameService.State.Status == GameStatus.CheckmateSente)
+            {
+                <span class="game-result">先手の勝ち！</span>
+            }
+            @if (GameService.State.Status == GameStatus.CheckmateGote)
+            {
+                <span class="game-result">後手の勝ち！</span>
+            }
+        </div>
+    </header>
+
+    <main class="game-main">
+        @if (!WebRtcService.IsConnected)
+        {
+            <ConnectionPanel
+                WebRtcService="WebRtcService"
+                OnConnected="OnConnected"
+                OnPlayerAssigned="OnPlayerAssigned" />
+        }
+        else
+        {
+            <div class="game-area">
+                <div class="player-info opponent">
+                    <span class="player-label">@(IsFlipped ? "先手" : "後手")</span>
+                </div>
+
+                <ShogiBoard
+                    State="GameService.State"
+                    GameService="GameService"
+                    OnMoveMade="OnMoveMade"
+                    IsFlipped="IsFlipped" />
+
+                <div class="player-info self">
+                    <span class="player-label">@(IsFlipped ? "後手" : "先手")（あなた）</span>
+                </div>
+
+                <div class="game-controls">
+                    @if (GameService.State.Status == GameStatus.Playing)
+                    {
+                        <button class="btn danger" @onclick="Resign">投了</button>
+                    }
+                    <button class="btn" @onclick="NewGame">新規対局</button>
+                </div>
+            </div>
+        }
+    </main>
+
+    <div class="move-history">
+        <h4>棋譜</h4>
+        <div class="history-list">
+            @for (int i = 0; i < GameService.State.MoveHistory.Count; i++)
+            {
+                var move = GameService.State.MoveHistory[i];
+                <span class="move-entry">@((i + 1)). @move.ToNotation()</span>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool IsFlipped => GameService.State.LocalPlayer == Player.Gote;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await WebRtcService.InitializeAsync();
+        WebRtcService.OnMoveReceived += OnRemoteMoveReceived;
+        WebRtcService.OnGameStart += OnRemoteGameStart;
+        GameService.OnStateChanged += OnGameStateChanged;
+    }
+
+    private void OnPlayerAssigned(bool isSente)
+    {
+        GameService.SetLocalPlayer(isSente ? Player.Sente : Player.Gote);
+    }
+
+    private async Task OnConnected(bool connected)
+    {
+        if (connected)
+        {
+            // 先手がゲーム開始を送信
+            if (GameService.State.LocalPlayer == Player.Sente)
+            {
+                GameService.NewGame();
+                await WebRtcService.SendGameStartAsync();
+            }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnRemoteGameStart()
+    {
+        GameService.NewGame();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnMoveMade(Move move)
+    {
+        await WebRtcService.SendMoveAsync(move);
+        StateHasChanged();
+    }
+
+    private void OnRemoteMoveReceived(Move move)
+    {
+        GameService.ApplyRemoteMove(move);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnGameStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task NewGame()
+    {
+        GameService.NewGame();
+        await WebRtcService.SendGameStartAsync();
+    }
+
+    private void Resign()
+    {
+        GameService.Resign();
+    }
+
+    public void Dispose()
+    {
+        WebRtcService.OnMoveReceived -= OnRemoteMoveReceived;
+        WebRtcService.OnGameStart -= OnRemoteGameStart;
+        GameService.OnStateChanged -= OnGameStateChanged;
+    }
+}

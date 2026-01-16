@@ -1,0 +1,205 @@
+@using ShogiGame.Services
+@inject IJSRuntime JS
+
+<div class="connection-panel">
+    <h3>P2P接続</h3>
+
+    <div class="connection-status">
+        状態: <span class="status-@ConnectionState.ToString().ToLower()">@GetStatusText()</span>
+    </div>
+
+    @if (ConnectionState == Services.ConnectionState.Disconnected)
+    {
+        <div class="connection-options">
+            <div class="option-section">
+                <h4>対局を開始する（先手）</h4>
+                <button class="btn primary" @onclick="CreateOffer" disabled="@IsProcessing">
+                    @(IsProcessing ? "生成中..." : "接続コードを生成")
+                </button>
+
+                @if (!string.IsNullOrEmpty(Offer))
+                {
+                    <div class="code-section">
+                        <label>このコードを相手に送ってください：</label>
+                        <textarea readonly @bind="Offer" rows="4"></textarea>
+                        <button class="btn small" @onclick="() => CopyToClipboard(Offer)">コピー</button>
+                    </div>
+
+                    <div class="code-section">
+                        <label>相手からの応答コードを貼り付け：</label>
+                        <textarea @bind="Answer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
+                        <button class="btn primary" @onclick="AcceptAnswer" disabled="@(string.IsNullOrEmpty(Answer))">
+                            接続
+                        </button>
+                    </div>
+                }
+            </div>
+
+            <div class="divider">または</div>
+
+            <div class="option-section">
+                <h4>対局に参加する（後手）</h4>
+                <div class="code-section">
+                    <label>相手からの接続コードを貼り付け：</label>
+                    <textarea @bind="ReceivedOffer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
+                    <button class="btn primary" @onclick="CreateAnswer" disabled="@(string.IsNullOrEmpty(ReceivedOffer) || IsProcessing)">
+                        @(IsProcessing ? "生成中..." : "応答コードを生成")
+                    </button>
+                </div>
+
+                @if (!string.IsNullOrEmpty(GeneratedAnswer))
+                {
+                    <div class="code-section">
+                        <label>この応答コードを相手に送ってください：</label>
+                        <textarea readonly @bind="GeneratedAnswer" rows="4"></textarea>
+                        <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
+                        <p class="hint">相手がこのコードを入力すると接続されます</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (ConnectionState == Services.ConnectionState.Connecting)
+    {
+        <div class="connecting">
+            <div class="spinner"></div>
+            <p>接続中...</p>
+        </div>
+    }
+
+    @if (ConnectionState == Services.ConnectionState.Connected)
+    {
+        <div class="connected">
+            <p>接続完了！</p>
+            <button class="btn danger" @onclick="Disconnect">切断</button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="error-message">@ErrorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public WebRtcService WebRtcService { get; set; } = null!;
+    [Parameter] public EventCallback<bool> OnConnected { get; set; }
+    [Parameter] public EventCallback<bool> OnPlayerAssigned { get; set; }
+
+    private ConnectionState ConnectionState => WebRtcService?.State ?? Services.ConnectionState.Disconnected;
+
+    private string Offer { get; set; } = "";
+    private string Answer { get; set; } = "";
+    private string ReceivedOffer { get; set; } = "";
+    private string GeneratedAnswer { get; set; } = "";
+    private string ErrorMessage { get; set; } = "";
+    private bool IsProcessing { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (WebRtcService != null)
+        {
+            WebRtcService.OnStateChanged += OnStateChanged;
+        }
+    }
+
+    private void OnStateChanged(ConnectionState state)
+    {
+        InvokeAsync(async () =>
+        {
+            if (state == Services.ConnectionState.Connected)
+            {
+                await OnConnected.InvokeAsync(true);
+            }
+            StateHasChanged();
+        });
+    }
+
+    private async Task CreateOffer()
+    {
+        try
+        {
+            IsProcessing = true;
+            ErrorMessage = "";
+            Offer = await WebRtcService.CreateOfferAsync();
+            await OnPlayerAssigned.InvokeAsync(true); // true = Sente
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"エラー: {ex.Message}";
+        }
+        finally
+        {
+            IsProcessing = false;
+        }
+    }
+
+    private async Task CreateAnswer()
+    {
+        try
+        {
+            IsProcessing = true;
+            ErrorMessage = "";
+            GeneratedAnswer = await WebRtcService.CreateAnswerAsync(ReceivedOffer);
+            await OnPlayerAssigned.InvokeAsync(false); // false = Gote
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"エラー: {ex.Message}";
+        }
+        finally
+        {
+            IsProcessing = false;
+        }
+    }
+
+    private async Task AcceptAnswer()
+    {
+        try
+        {
+            ErrorMessage = "";
+            await WebRtcService.AcceptAnswerAsync(Answer);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"エラー: {ex.Message}";
+        }
+    }
+
+    private async Task Disconnect()
+    {
+        await WebRtcService.DisconnectAsync();
+        ClearAll();
+    }
+
+    private void ClearAll()
+    {
+        Offer = "";
+        Answer = "";
+        ReceivedOffer = "";
+        GeneratedAnswer = "";
+        ErrorMessage = "";
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+
+    private string GetStatusText() => ConnectionState switch
+    {
+        Services.ConnectionState.Disconnected => "未接続",
+        Services.ConnectionState.Connecting => "接続中",
+        Services.ConnectionState.Connected => "接続済み",
+        _ => "不明"
+    };
+
+    public void Dispose()
+    {
+        if (WebRtcService != null)
+        {
+            WebRtcService.OnStateChanged -= OnStateChanged;
+        }
+    }
+}
