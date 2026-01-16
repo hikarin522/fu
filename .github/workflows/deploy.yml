@@ -36,7 +36,7 @@ jobs:
         run: dotnet publish ShogiGame.csproj -c Release -o publish --no-build
 
       - name: Change base href
-        run: sed -i 's/<base href="\/" \/>/<base href="\/fu\/" \/>/g' publish/wwwroot/index.html
+        run: sed -i 's|<base href="/" />|<base href="/fu/" />|g' publish/wwwroot/index.html
 
       - name: Add .nojekyll
         run: touch publish/wwwroot/.nojekyll
