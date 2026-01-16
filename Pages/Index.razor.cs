@@ -1,14 +1,16 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.JSInterop;
 
 using ShogiGame.Models;
 using ShogiGame.Services;
 
 namespace ShogiGame.Pages;
 
-public partial class Index : IDisposable
+public partial class Index : IAsyncDisposable
 {
     [Inject] private ShogiGameService GameService { get; set; } = null!;
     [Inject] private WebRtcService WebRtcService { get; set; } = null!;
+    [Inject] private IJSRuntime JS { get; set; } = null!;
 
     private bool IsFlipped => this.GameService.State.LocalPlayer == Player.Gote;
     private string? InitError { get; set; }
@@ -17,86 +19,80 @@ public partial class Index : IDisposable
     {
         try {
             await this.WebRtcService.InitializeAsync();
-            this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceived;
-            this.WebRtcService.OnGameStart += this.OnRemoteGameStart;
-            this.WebRtcService.OnDataChannelReady += this.OnDataChannelReady;
-            this.GameService.OnStateChanged += this.OnGameStateChanged;
+            this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceivedAsync;
+            this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
+            this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
+            this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
         }
         catch (Exception ex) {
             this.InitError = ex.Message;
-            Console.WriteLine($"Init error: {ex}");
         }
     }
 
-    private void OnPlayerAssigned(bool isSente)
+    private async Task OnPlayerAssignedAsync(bool isSente)
     {
         var player = isSente ? Player.Sente : Player.Gote;
-        Console.WriteLine($"OnPlayerAssigned: isSente={isSente}, setting LocalPlayer to {player}");
-        this.GameService.SetLocalPlayer(player);
+        await this.GameService.SetLocalPlayerAsync(player);
     }
 
-    private async Task OnConnected(bool connected)
+    private async Task OnConnected()
     {
-        Console.WriteLine($"OnConnected: connected={connected}, LocalPlayer={this.GameService.State.LocalPlayer}");
-        // DataChannelの準備完了を待つため、ここではゲーム開始しない
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private void OnDataChannelReady()
+    private async Task OnDataChannelReadyAsync()
     {
-        Console.WriteLine($"OnDataChannelReady: LocalPlayer={this.GameService.State.LocalPlayer}");
-        this.InvokeAsync(async () => {
+        await this.InvokeAsync(async () => {
             if (this.GameService.State.LocalPlayer is Player.Sente) {
-                Console.WriteLine("Sente: DataChannel ready, starting new game and sending gameStart");
-                this.GameService.NewGame();
+                await this.GameService.NewGameAsync();
                 await this.WebRtcService.SendGameStartAsync();
-            }
-            else {
-                Console.WriteLine("Gote: DataChannel ready, waiting for gameStart from Sente");
             }
             this.StateHasChanged();
         });
     }
 
-    private void OnRemoteGameStart()
+    private async Task OnRemoteGameStartAsync()
     {
-        Console.WriteLine($"OnRemoteGameStart received, LocalPlayer={this.GameService.State.LocalPlayer}");
-        this.GameService.NewGame();
-        Console.WriteLine($"After NewGame: Status={this.GameService.State.Status}, LocalPlayer={this.GameService.State.LocalPlayer}");
-        this.InvokeAsync(this.StateHasChanged);
+        await this.GameService.NewGameAsync();
+        await this.InvokeAsync(this.StateHasChanged);
     }
 
     private async Task OnMoveMade(Move move)
     {
-        Console.WriteLine($"OnMoveMade: {move.ToNotation()}, sending to opponent");
         await this.WebRtcService.SendMoveAsync(move);
         this.StateHasChanged();
     }
 
-    private void OnRemoteMoveReceived(Move move)
+    private async Task OnRemoteMoveReceivedAsync(Move move)
     {
-        Console.WriteLine($"OnRemoteMoveReceived: {move.ToNotation()}");
-        this.GameService.ApplyRemoteMove(move);
-        Console.WriteLine($"After ApplyRemoteMove: CurrentPlayer={this.GameService.State.CurrentPlayer}");
-        this.InvokeAsync(this.StateHasChanged);
+        await this.GameService.ApplyRemoteMoveAsync(move);
+        await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private void OnGameStateChanged() => this.InvokeAsync(this.StateHasChanged);
+    private async ValueTask OnGameStateChangedAsync() => await this.InvokeAsync(this.StateHasChanged);
 
-    private async Task NewGame()
+    private async Task NewGameAsync()
     {
-        this.GameService.NewGame();
+        await this.GameService.NewGameAsync();
         await this.WebRtcService.SendGameStartAsync();
     }
 
-    private void Resign() => this.GameService.Resign();
+    private Task ResignAsync() => this.GameService.ResignAsync();
 
-    public void Dispose()
+    private async Task DownloadKifAsync()
     {
-        this.WebRtcService.OnMoveReceived -= this.OnRemoteMoveReceived;
-        this.WebRtcService.OnGameStart -= this.OnRemoteGameStart;
-        this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReady;
-        this.GameService.OnStateChanged -= this.OnGameStateChanged;
+        var kif = KifExporter.Export(this.GameService.State.MoveHistory, this.GameService.State.Status);
+        var fileName = $"shogi_{DateTime.Now:yyyyMMdd_HHmmss}.kif";
+        await this.JS.InvokeVoidAsync("downloadTextFile", fileName, kif);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        this.WebRtcService.OnMoveReceived -= this.OnRemoteMoveReceivedAsync;
+        this.WebRtcService.OnGameStart -= this.OnRemoteGameStartAsync;
+        this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReadyAsync;
+        this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
+        await this.WebRtcService.DisposeAsync();
         GC.SuppressFinalize(this);
     }
 }

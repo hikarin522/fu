@@ -32,7 +32,7 @@
             <ConnectionPanel
                 WebRtcService="WebRtcService"
                 OnConnected="OnConnected"
-                OnPlayerAssigned="OnPlayerAssigned" />
+                OnPlayerAssigned="OnPlayerAssignedAsync" />
         }
         else
         {
@@ -54,16 +54,22 @@
                 <div class="game-controls">
                     @if (GameService.State.Status == GameStatus.Playing)
                     {
-                        <button class="btn danger" @onclick="Resign">投了</button>
+                        <button class="btn danger" @onclick="ResignAsync">投了</button>
                     }
-                    <button class="btn" @onclick="NewGame">新規対局</button>
+                    <button class="btn" @onclick="NewGameAsync">新規対局</button>
                 </div>
             </div>
         }
     </main>
 
     <div class="move-history">
-        <h4>棋譜</h4>
+        <div class="move-history-header">
+            <h4>棋譜</h4>
+            @if (GameService.State.MoveHistory.Count > 0)
+            {
+                <button class="btn-small" @onclick="DownloadKifAsync">保存</button>
+            }
+        </div>
         <div class="history-list">
             @for (int i = 0; i < GameService.State.MoveHistory.Count; i++)
             {

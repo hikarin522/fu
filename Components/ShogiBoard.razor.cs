@@ -22,7 +22,7 @@ public partial class ShogiBoard
     private PieceType? SelectedDropPiece { get; set; }
     private List<Position> DropLegalMoves { get; set; } = [];
 
-    private void OnCellClick(Position pos)
+    private async Task OnCellClickAsync(Position pos)
     {
         if (this.State.Status != GameStatus.Playing || !this.State.IsMyTurn) {
             return;
@@ -32,7 +32,7 @@ public partial class ShogiBoard
         if (this.IsSelectingDropTarget && this.SelectedDropPiece is { } dropPiece) {
             if (this.DropLegalMoves.Contains(pos)) {
                 var move = Move.CreateDrop(pos, dropPiece, this.State.CurrentPlayer);
-                this.ExecuteMove(move);
+                await this.ExecuteMoveAsync(move);
             }
             this.ClearSelection();
             return;
@@ -45,8 +45,9 @@ public partial class ShogiBoard
             if (piece is not null && this.GameService.CanPromote(from, pos)) {
                 if (this.GameService.MustPromote(from, pos)) {
                     // 強制成り
-                    var move = new Move(from, pos, piece.Type, true) { Player = this.State.CurrentPlayer };
-                    this.ExecuteMove(move);
+                    var move = Move.CreateMove(from, pos, piece.Type, isPromotion: true)
+                        .WithPlayer(this.State.CurrentPlayer);
+                    await this.ExecuteMoveAsync(move);
                     this.ClearSelection();
                 }
                 else {
@@ -57,8 +58,9 @@ public partial class ShogiBoard
                 }
             }
             else {
-                var move = new Move(from, pos, piece!.Type, false) { Player = this.State.CurrentPlayer };
-                this.ExecuteMove(move);
+                var move = Move.CreateMove(from, pos, piece!.Type)
+                    .WithPlayer(this.State.CurrentPlayer);
+                await this.ExecuteMoveAsync(move);
                 this.ClearSelection();
             }
             return;
@@ -95,24 +97,23 @@ public partial class ShogiBoard
         this.SelectedPosition = null;
     }
 
-    private void CompleteMove(bool promote)
+    private async Task CompleteMoveAsync(bool promote)
     {
         this.ShowPromotionDialog = false;
 
         if (this.PendingMoveFrom is { } moveFrom && this.PendingMoveTo is { } moveTo) {
             var piece = this.State.Board[moveFrom];
-            var move = new Move(moveFrom, moveTo, piece!.Type, promote) {
-                Player = this.State.CurrentPlayer
-            };
-            this.ExecuteMove(move);
+            var move = Move.CreateMove(moveFrom, moveTo, piece!.Type, promote)
+                .WithPlayer(this.State.CurrentPlayer);
+            await this.ExecuteMoveAsync(move);
         }
 
         this.ClearSelection();
     }
 
-    private async void ExecuteMove(Move move)
+    private async Task ExecuteMoveAsync(Move move)
     {
-        if (this.GameService.TryMakeMove(move)) {
+        if (await this.GameService.TryMakeMoveAsync(move)) {
             await this.OnMoveMade.InvokeAsync(move);
         }
     }
@@ -139,6 +140,6 @@ public partial class ShogiBoard
         if (this.State.MoveHistory is not [.., var lastMove]) {
             return false;
         }
-        return lastMove.To == pos || lastMove.From == pos;
+        return lastMove.To == pos || (lastMove.From is { } from && from == pos);
     }
 }

@@ -9,7 +9,7 @@ namespace ShogiGame.Components;
 public partial class ConnectionPanel : IDisposable
 {
     [Parameter] public WebRtcService WebRtcService { get; set; } = null!;
-    [Parameter] public EventCallback<bool> OnConnected { get; set; }
+    [Parameter] public EventCallback OnConnected { get; set; }
     [Parameter] public EventCallback<bool> OnPlayerAssigned { get; set; }
 
     [Inject] private IJSRuntime JS { get; set; } = null!;
@@ -34,52 +34,44 @@ public partial class ConnectionPanel : IDisposable
     protected override void OnInitialized()
     {
         if (this.WebRtcService is not null) {
-            this.WebRtcService.OnStateChanged += this.OnStateChanged;
+            this.WebRtcService.OnStateChanged += this.OnStateChangedAsync;
         }
     }
 
-    private void OnStateChanged(ConnectionState state)
+    private async Task OnStateChangedAsync(ConnectionState state)
     {
-        this.InvokeAsync(async () => {
+        await this.InvokeAsync(async () => {
             if (state == ConnectionState.Connected && !this.HasNotifiedConnected) {
                 this.HasNotifiedConnected = true;
-                await this.OnConnected.InvokeAsync(true);
+                await this.OnConnected.InvokeAsync();
             }
             this.StateHasChanged();
         });
     }
 
-    private async Task CreateRoom()
-    {
-        try {
-            this.IsProcessing = true;
-            this.ErrorMessage = "";
-            this.StateHasChanged();
-            this.RoomId = (await this.WebRtcService.CreateRoomAsync()).AsPrimitive();
-            await this.OnPlayerAssigned.InvokeAsync(true);  // Sente
-        }
-        catch (Exception ex) {
-            this.ErrorMessage = $"エラー: {ex.Message}";
-            Console.WriteLine($"CreateRoom error: {ex}");
-        }
-        finally {
-            this.IsProcessing = false;
-            this.StateHasChanged();
-        }
-    }
+    private Task CreateRoom() => this.ExecuteWithProcessing(async () => {
+        this.RoomId = (await this.WebRtcService.CreateRoomAsync()).AsPrimitive();
+        await this.OnPlayerAssigned.InvokeAsync(true);  // Sente
+    });
 
-    private async Task JoinRoom()
+    private Task JoinRoom() => this.ExecuteWithProcessing(async () => {
+        if (string.IsNullOrWhiteSpace(this.InputRoomId)) {
+            throw new InvalidOperationException("ルームIDを入力してください");
+        }
+        await this.WebRtcService.JoinRoomAsync(new RoomId(this.InputRoomId.Trim().ToUpperInvariant()));
+        await this.OnPlayerAssigned.InvokeAsync(false);  // Gote
+    });
+
+    private async Task ExecuteWithProcessing(Func<Task> action)
     {
         try {
             this.IsProcessing = true;
             this.ErrorMessage = "";
             this.StateHasChanged();
-            await this.WebRtcService.JoinRoomAsync(new RoomId(this.InputRoomId.ToUpperInvariant()));
-            await this.OnPlayerAssigned.InvokeAsync(false);  // Gote
+            await action();
         }
         catch (Exception ex) {
             this.ErrorMessage = $"エラー: {ex.Message}";
-            Console.WriteLine($"JoinRoom error: {ex}");
         }
         finally {
             this.IsProcessing = false;
@@ -116,7 +108,7 @@ public partial class ConnectionPanel : IDisposable
     public void Dispose()
     {
         if (this.WebRtcService is not null) {
-            this.WebRtcService.OnStateChanged -= this.OnStateChanged;
+            this.WebRtcService.OnStateChanged -= this.OnStateChangedAsync;
         }
         GC.SuppressFinalize(this);
     }

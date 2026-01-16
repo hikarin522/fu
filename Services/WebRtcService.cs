@@ -30,10 +30,10 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
     public bool IsConnected => this.State == ConnectionState.Connected && this._dataChannelOpen;
 
-    public event Action<Move>? OnMoveReceived;
-    public event Action<ConnectionState>? OnStateChanged;
-    public event Action? OnGameStart;
-    public event Action? OnDataChannelReady;
+    public event Func<Move, Task>? OnMoveReceived;
+    public event Func<ConnectionState, Task>? OnStateChanged;
+    public event Func<Task>? OnGameStart;
+    public event Func<Task>? OnDataChannelReady;
 
     public async Task InitializeAsync()
     {
@@ -56,7 +56,6 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     {
         var message = new MoveMessage(move.ToDto());
         var json = JsonSerializer.Serialize(message, JsonConfig.Options);
-        Console.WriteLine($"SendMoveAsync: sending {json}");
         await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 
@@ -64,84 +63,81 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     {
         var message = new GameStartMessage();
         var json = JsonSerializer.Serialize(message, JsonConfig.Options);
-        Console.WriteLine($"SendGameStartAsync: sending {json}");
         await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 
-    [JSInvokable]
-    public void OnConnectionStateChanged(string state)
+    private async Task SetStateAsync(ConnectionState newState)
     {
-        var newState = state switch {
+        if (this.State != newState) {
+            this.State = newState;
+            if (OnStateChanged is { } handler) {
+                await handler(this.State);
+            }
+        }
+    }
+
+    [JSInvokable]
+    public Task OnConnectionStateChanged(string state)
+    {
+        var newState = state.ToLowerInvariant() switch {
             "connected" => ConnectionState.Connected,
             "connecting" => ConnectionState.Connecting,
             _ => ConnectionState.Disconnected
         };
-        if (this.State != newState) {
-            this.State = newState;
-            OnStateChanged?.Invoke(this.State);
-        }
+        return this.SetStateAsync(newState);
     }
 
     [JSInvokable]
-    public void OnDataChannelOpen()
+    public async Task OnDataChannelOpen()
     {
-        Console.WriteLine("OnDataChannelOpen called");
         this._dataChannelOpen = true;
-        if (this.State != ConnectionState.Connected) {
-            this.State = ConnectionState.Connected;
-            OnStateChanged?.Invoke(this.State);
+        await this.SetStateAsync(ConnectionState.Connected);
+        if (OnDataChannelReady is { } handler) {
+            await handler();
         }
-        OnDataChannelReady?.Invoke();
     }
 
     [JSInvokable]
-    public void OnDataChannelClose()
+    public Task OnDataChannelClose()
     {
-        Console.WriteLine("OnDataChannelClose called");
         this._dataChannelOpen = false;
-        if (this.State != ConnectionState.Disconnected) {
-            this.State = ConnectionState.Disconnected;
-            OnStateChanged?.Invoke(this.State);
-        }
+        return this.SetStateAsync(ConnectionState.Disconnected);
     }
 
     [JSInvokable]
-    public void OnMessageReceived(string message)
+    public async Task OnMessageReceived(string message)
     {
         try {
             using var doc = JsonDocument.Parse(message);
             var type = doc.RootElement.GetProperty("Type").GetString();
 
-            Console.WriteLine($"OnMessageReceived: type={type}");
             switch (type) {
                 case "move":
-                    Console.WriteLine($"Deserializing move message: {message}");
                     var moveMessage = JsonSerializer.Deserialize<MoveMessage>(message, JsonConfig.Options);
-                    Console.WriteLine($"Deserialized: moveMessage={moveMessage is not null}");
                     if (moveMessage is { } msg) {
                         var move = Move.FromDto(msg.Move);
-                        Console.WriteLine($"Move details: From=({move.From?.Col},{move.From?.Row}) To=({move.To.Col},{move.To.Row}) PieceType={move.PieceType}");
-                        Console.WriteLine($"Invoking OnMoveReceived");
-                        OnMoveReceived?.Invoke(move);
+                        if (OnMoveReceived is { } moveHandler) {
+                            await moveHandler(move);
+                        }
                     }
                     break;
 
                 case "gameStart":
-                    Console.WriteLine("Received gameStart, invoking OnGameStart");
-                    OnGameStart?.Invoke();
+                    if (OnGameStart is { } startHandler) {
+                        await startHandler();
+                    }
                     break;
             }
         }
-        catch (Exception ex) {
-            Console.WriteLine($"Error parsing message: {ex.Message}");
+        catch (JsonException) {
+            // Ignore JSON parse errors from malformed messages
         }
     }
 
     public async Task DisconnectAsync()
     {
         await jsRuntime.InvokeVoidAsync("WebRtc.disconnect");
-        this.State = ConnectionState.Disconnected;
-        OnStateChanged?.Invoke(this.State);
+        await this.SetStateAsync(ConnectionState.Disconnected);
     }
 
     public async ValueTask DisposeAsync()

@@ -43,7 +43,7 @@
 
                             <div class="cell @(isSelected ? "selected" : "") @(isLegalMove ? "legal-move" : "") @(isLastMove ? "last-move" : "")"
                                  data-col="@displayCol" data-row="@displayRow"
-                                 @onclick="() => OnCellClick(pos)" @onclick:stopPropagation="true">
+                                 @onclick="() => OnCellClickAsync(pos)" @onclick:stopPropagation="true">
                                 @if (piece != null)
                                 {
                                     @* 後手視点(IsFlipped)では先手の駒を逆さま、先手視点では後手の駒を逆さまに *@
@@ -77,8 +77,8 @@
     <div class="promotion-dialog-overlay" @onclick="() => ShowPromotionDialog = false">
         <div class="promotion-dialog" @onclick:stopPropagation="true">
             <p>成りますか？</p>
-            <button @onclick="() => CompleteMove(true)">成る</button>
-            <button @onclick="() => CompleteMove(false)">不成</button>
+            <button @onclick="() => CompleteMoveAsync(true)">成る</button>
+            <button @onclick="() => CompleteMoveAsync(false)">不成</button>
         </div>
     </div>
 }

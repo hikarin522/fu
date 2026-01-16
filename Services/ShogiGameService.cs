@@ -12,22 +12,25 @@ public class ShogiGameService
 
     public GameState State { get; private set; } = GameState.Initial;
 
-    public event Action? OnStateChanged;
+    public event Func<ValueTask>? OnStateChangedAsync;
 
-    public void NewGame()
+    private ValueTask NotifyStateChangedAsync() =>
+        OnStateChangedAsync is { } handler ? handler() : ValueTask.CompletedTask;
+
+    public async Task NewGameAsync()
     {
         var localPlayer = this.State.LocalPlayer;
         this.State = GameState.Initial with {
             Status = GameStatus.Playing,
             LocalPlayer = localPlayer
         };
-        OnStateChanged?.Invoke();
+        await this.NotifyStateChangedAsync();
     }
 
-    public void SetLocalPlayer(Player player)
+    public async Task SetLocalPlayerAsync(Player player)
     {
         this.State = this.State with { LocalPlayer = player };
-        OnStateChanged?.Invoke();
+        await this.NotifyStateChangedAsync();
     }
 
     public List<Position> GetLegalMoves(Position from)
@@ -126,15 +129,14 @@ public class ShogiGameService
         return true;
     }
 
-    public bool TryMakeMove(Move move)
+    public async Task<bool> TryMakeMoveAsync(Move move)
     {
-        Console.WriteLine($"TryMakeMove: Status={this.State.Status}, IsDrop={move.IsDrop}");
         if (this.State.Status != GameStatus.Playing) {
             return false;
         }
 
         if (move.IsDrop) {
-            return this.TryDropPiece(move);
+            return await this.TryDropPieceAsync(move);
         }
 
         if (move.From is null) {
@@ -145,13 +147,11 @@ public class ShogiGameService
         var to = move.To;
         var piece = this.State.Board[from];
 
-        Console.WriteLine($"TryMakeMove: from=({from.Col},{from.Row}) piece={piece?.Type} owner={piece?.Owner} currentPlayer={this.State.CurrentPlayer}");
         if (piece is null || piece.Owner != this.State.CurrentPlayer) {
             return false;
         }
 
         var legalMoves = this.GetLegalMoves(from);
-        Console.WriteLine($"TryMakeMove: legalMoves.Count={legalMoves.Count}, to=({to.Col},{to.Row})");
         if (!legalMoves.Contains(to)) {
             return false;
         }
@@ -159,19 +159,21 @@ public class ShogiGameService
         // 駒を取る場合の処理
         var captured = this.State.Board[to];
         var newCaptured = this.State.GetCapturedPieces(this.State.CurrentPlayer);
+        var moveToRecord = move;
+
         if (captured is not null) {
             newCaptured = newCaptured.Add(captured.Type);
-            move.CapturedPiece = captured.Type;
+            moveToRecord = move.WithCapturedPiece(captured.Type);
 
             // 王が取られた場合はゲーム終了
             if (captured.Type == PieceType.King) {
                 this.State = this.State with {
                     Board = this.State.Board.MovePiece(from, to),
-                    MoveHistory = this.State.MoveHistory.Add(move),
+                    MoveHistory = this.State.MoveHistory.Add(moveToRecord),
                     Status = this.State.CurrentPlayer.GetWinStatus()
                 };
                 this.State = this.State.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
-                OnStateChanged?.Invoke();
+                await this.NotifyStateChangedAsync();
                 return true;
             }
         }
@@ -183,7 +185,7 @@ public class ShogiGameService
 
         var newState = this.State with {
             Board = this.State.Board.MovePiece(from, to, newPiece),
-            MoveHistory = this.State.MoveHistory.Add(move)
+            MoveHistory = this.State.MoveHistory.Add(moveToRecord)
         };
         newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
         newState = newState.SwitchPlayer();
@@ -191,13 +193,13 @@ public class ShogiGameService
         this.State = newState;
 
         // 詰みチェック
-        this.CheckForCheckmate();
+        await this.CheckForCheckmateAsync();
 
-        OnStateChanged?.Invoke();
+        await this.NotifyStateChangedAsync();
         return true;
     }
 
-    private bool TryDropPiece(Move move)
+    private async Task<bool> TryDropPieceAsync(Move move)
     {
         var captured = this.State.GetCapturedPieces(this.State.CurrentPlayer);
         if (captured.GetCount(move.PieceType) <= 0) {
@@ -209,7 +211,7 @@ public class ShogiGameService
             return false;
         }
 
-        var newCaptured = captured.Remove(move.PieceType);
+        var newCaptured = captured.TryRemove(move.PieceType);
         if (newCaptured is null) {
             return false;
         }
@@ -223,19 +225,14 @@ public class ShogiGameService
 
         this.State = newState;
 
-        this.CheckForCheckmate();
+        await this.CheckForCheckmateAsync();
 
-        OnStateChanged?.Invoke();
+        await this.NotifyStateChangedAsync();
         return true;
     }
 
-    public void ApplyRemoteMove(Move move)
-    {
-        Console.WriteLine($"ApplyRemoteMove: From=({move.From?.Col},{move.From?.Row}) To=({move.To.Col},{move.To.Row}) CurrentPlayer={this.State.CurrentPlayer}");
-        move.Player = this.State.CurrentPlayer;
-        var result = this.TryMakeMove(move);
-        Console.WriteLine($"ApplyRemoteMove: TryMakeMove returned {result}");
-    }
+    public Task ApplyRemoteMoveAsync(Move move) =>
+        this.TryMakeMoveAsync(move.WithPlayer(this.State.CurrentPlayer));
 
     public bool CanPromote(Position from, Position to)
     {
@@ -394,7 +391,7 @@ public class ShogiGameService
 
     public bool IsInCheck() => IsInCheck(this.State.Board, this.State.CurrentPlayer);
 
-    private void CheckForCheckmate()
+    private async Task CheckForCheckmateAsync()
     {
         var currentPlayer = this.State.CurrentPlayer;
 
@@ -417,14 +414,14 @@ public class ShogiGameService
         this.State = this.State with {
             Status = currentPlayer.GetOpponent().GetWinStatus()
         };
-        OnStateChanged?.Invoke();
+        await this.NotifyStateChangedAsync();
     }
 
-    public void Resign()
+    public async Task ResignAsync()
     {
         this.State = this.State with {
             Status = this.State.CurrentPlayer.GetOpponent().GetWinStatus()
         };
-        OnStateChanged?.Invoke();
+        await this.NotifyStateChangedAsync();
     }
 }

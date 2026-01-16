@@ -3,47 +3,37 @@ using ShogiGame.Models.Dto;
 namespace ShogiGame.Models;
 
 /// <summary>
-/// 指し手を表すドメインモデル
+/// 指し手を表す不変レコード
 /// </summary>
-public class Move
+public sealed record Move(
+    Position To,
+    PieceType PieceType,
+    bool IsPromotion = false,
+    bool IsDrop = false,
+    Position? From = null,
+    PieceType? CapturedPiece = null,
+    Player Player = Player.None)
 {
-    /// <summary>移動元（nullなら持ち駒を打つ）</summary>
-    public Position? From { get; set; }
-    public Position To { get; set; }
-    public PieceType PieceType { get; set; }
-    public bool IsPromotion { get; set; }
-    /// <summary>持ち駒を打つ場合true</summary>
-    public bool IsDrop { get; set; }
-    /// <summary>取った駒（あれば）</summary>
-    public PieceType? CapturedPiece { get; set; }
-    /// <summary>この手を指したプレイヤー</summary>
-    public Player Player { get; set; }
-
-    public Move() { }
-
-    public Move(Position from, Position to, PieceType pieceType, bool isPromotion = false)
-    {
-        this.From = from;
-        this.To = to;
-        this.PieceType = pieceType;
-        this.IsPromotion = isPromotion;
-        this.IsDrop = false;
-    }
+    /// <summary>盤上の駒を動かす手を作成</summary>
+    public static Move CreateMove(Position from, Position to, PieceType pieceType, bool isPromotion = false) =>
+        new(to, pieceType, isPromotion, IsDrop: false, From: from);
 
     /// <summary>持ち駒を打つ手を作成</summary>
-    public static Move CreateDrop(Position to, PieceType pieceType, Player player) => new() {
-        From = null,
-        To = to,
-        PieceType = pieceType,
-        IsPromotion = false,
-        IsDrop = true,
-        Player = player
-    };
+    public static Move CreateDrop(Position to, PieceType pieceType, Player player) =>
+        new(to, pieceType, IsPromotion: false, IsDrop: true, Player: player);
 
     /// <summary>棋譜表記 (例: 7六歩、7六歩成、7六歩打)</summary>
     public string ToNotation() => this.IsDrop
         ? $"{this.To.ToNotation()}{this.PieceType.GetCapturedChar()}打"
         : $"{this.To.ToNotation()}{this.PieceType.GetCapturedChar()}{(this.IsPromotion ? "成" : "")}";
+
+    /// <summary>取った駒を設定した新しいインスタンスを返す</summary>
+    public Move WithCapturedPiece(PieceType capturedPiece) =>
+        this with { CapturedPiece = capturedPiece };
+
+    /// <summary>プレイヤーを設定した新しいインスタンスを返す</summary>
+    public Move WithPlayer(Player player) =>
+        this with { Player = player };
 
     // DTO変換
     public MoveDto ToDto() => new(
@@ -55,12 +45,12 @@ public class Move
         this.CapturedPiece
     );
 
-    public static Move FromDto(MoveDto dto) => new() {
-        From = dto.From is { } from ? Position.FromDto(from) : null,
-        To = Position.FromDto(dto.To),
-        PieceType = dto.PieceType,
-        IsPromotion = dto.IsPromotion,
-        IsDrop = dto.IsDrop,
-        CapturedPiece = dto.CapturedPiece
-    };
+    public static Move FromDto(MoveDto dto) => new(
+        Position.FromDto(dto.To),
+        dto.PieceType,
+        dto.IsPromotion,
+        dto.IsDrop,
+        dto.From is { } from ? Position.FromDto(from) : null,
+        dto.CapturedPiece
+    );
 }

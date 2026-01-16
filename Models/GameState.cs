@@ -57,7 +57,7 @@ public record CapturedPieces(ImmutableDictionary<PieceType, int> Pieces)
     }
 
     /// <summary>駒を削除して新しいインスタンスを返す（失敗時はnull）</summary>
-    public CapturedPieces? Remove(PieceType type)
+    public CapturedPieces? TryRemove(PieceType type)
     {
         if (this.Pieces.TryGetValue(type, out var count) && count > 0) {
             return this with { Pieces = this.Pieces.SetItem(type, count - 1) };

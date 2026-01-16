@@ -13,15 +13,19 @@ public record Board
     public Piece? this[int col, int row] => this._squares[col * Size + row];
     public Piece? this[Position pos] => this._squares[pos.Col * Size + pos.Row];
 
-    /// <summary>全マス位置を列挙</summary>
-    public static IEnumerable<Position> AllPositions {
-        get {
-            for (var col = 0; col < Size; col++) {
-                for (var row = 0; row < Size; row++) {
-                    yield return new Position(col, row);
-                }
+    /// <summary>全マス位置（静的配列）</summary>
+    public static readonly Position[] AllPositions = CreateAllPositions();
+
+    private static Position[] CreateAllPositions()
+    {
+        var positions = new Position[Size * Size];
+        var index = 0;
+        for (var col = 0; col < Size; col++) {
+            for (var row = 0; row < Size; row++) {
+                positions[index++] = new Position(col, row);
             }
         }
+        return positions;
     }
 
     private Board(ImmutableArray<Piece?> squares) => this._squares = squares;
