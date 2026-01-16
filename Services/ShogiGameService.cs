@@ -57,11 +57,22 @@ public class ShogiGameService
                 if (pieceType == PieceType.Pawn && WouldBePawnDropMate(pos))
                     continue;
 
+                // 王手回避チェック：打った後も王手状態なら打てない
+                if (WouldBeInCheckAfterDrop(pos, pieceType, State.CurrentPlayer))
+                    continue;
+
                 positions.Add(pos);
             }
         }
 
         return positions;
+    }
+
+    private bool WouldBeInCheckAfterDrop(Position dropPos, PieceType pieceType, Player player)
+    {
+        var testBoard = State.Board.Clone();
+        testBoard[dropPos] = new Piece(pieceType, player);
+        return IsInCheck(testBoard, player);
     }
 
     private bool CanExistAtRow(PieceType type, int row, Player player)
