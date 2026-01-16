@@ -7,15 +7,18 @@ public readonly struct Position : IEquatable<Position>
     // 将棋の座標系: 右上が1一(0,0)、左下が9九(8,8)
     // Colは筋(1-9)、Rowは段(一-九)
     [JsonInclude]
+    [JsonPropertyName("Col")]
     public int Col { get; init; }  // 0-8 (内部表現)
+
     [JsonInclude]
+    [JsonPropertyName("Row")]
     public int Row { get; init; }  // 0-8 (内部表現)
 
     [JsonConstructor]
-    public Position(int Col, int Row)  // パラメータ名を大文字にしてJSONプロパティ名と一致させる
+    public Position(int col, int row)  // 小文字パラメータ名 + JsonPropertyNameで解決
     {
-        this.Col = Col;
-        this.Row = Row;
+        Col = col;
+        Row = row;
     }
 
     [JsonIgnore]

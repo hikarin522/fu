@@ -4,6 +4,16 @@ using System.Text.Json;
 
 namespace ShogiGame.Services;
 
+// .NET 10対応: デシリアライズオプション
+internal static class JsonConfig
+{
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = null  // PascalCase維持
+    };
+}
+
 public enum ConnectionState
 {
     Disconnected,
@@ -40,7 +50,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 
     public async Task SendMoveAsync(Move move)
     {
-        var json = JsonSerializer.Serialize(new MoveMessage { Type = "move", Move = move });
+        var json = JsonSerializer.Serialize(new MoveMessage { Type = "move", Move = move }, JsonConfig.Options);
         Console.WriteLine($"SendMoveAsync: sending {json}");
         await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
@@ -101,7 +111,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
             {
                 case "move":
                     Console.WriteLine($"Deserializing move message: {message}");
-                    var moveMessage = JsonSerializer.Deserialize<MoveMessage>(message);
+                    var moveMessage = JsonSerializer.Deserialize<MoveMessage>(message, JsonConfig.Options);
                     Console.WriteLine($"Deserialized: moveMessage={moveMessage is not null}, Move={moveMessage?.Move is not null}");
                     if (moveMessage?.Move is { } move)  // Pattern matching with property pattern
                     {
