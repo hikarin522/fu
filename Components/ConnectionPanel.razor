@@ -71,6 +71,24 @@
                 <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
             </div>
         }
+        else if (!string.IsNullOrEmpty(Offer))
+        {
+            <div class="waiting-connection">
+                <p>応答コードを入力してください</p>
+                <div class="code-section">
+                    <label>接続コード（相手に送ってください）：</label>
+                    <textarea readonly @bind="Offer" rows="4"></textarea>
+                    <button class="btn small" @onclick="() => CopyToClipboard(Offer)">コピー</button>
+                </div>
+                <div class="code-section">
+                    <label>相手からの応答コードを貼り付け：</label>
+                    <textarea @bind="Answer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
+                    <button class="btn primary" @onclick="AcceptAnswer" disabled="@(string.IsNullOrEmpty(Answer))">
+                        接続
+                    </button>
+                </div>
+            </div>
+        }
         else
         {
             <div class="connecting">
