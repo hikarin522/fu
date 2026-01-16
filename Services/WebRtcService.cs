@@ -41,14 +41,13 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         await jsRuntime.InvokeVoidAsync("WebRtc.initialize", _dotNetRef);
     }
 
-    public async Task<string> CreateOfferAsync() =>
-        await jsRuntime.InvokeAsync<string>("WebRtc.createOffer");
+    // PeerJS: ルームを作成（先手用）- 6文字のルームIDを返す
+    public async Task<string> CreateRoomAsync() =>
+        await jsRuntime.InvokeAsync<string>("WebRtc.createRoom");
 
-    public async Task<string> CreateAnswerAsync(string offer) =>
-        await jsRuntime.InvokeAsync<string>("WebRtc.createAnswer", offer);
-
-    public async Task AcceptAnswerAsync(string answer) =>
-        await jsRuntime.InvokeVoidAsync("WebRtc.acceptAnswer", answer);
+    // PeerJS: ルームに参加（後手用）
+    public async Task JoinRoomAsync(string roomId) =>
+        await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId);
 
     public async Task SendMoveAsync(Move move)
     {

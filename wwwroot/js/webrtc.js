@@ -1,190 +1,163 @@
-// WebRTC P2P Communication for Shogi Game
+// WebRTC P2P Communication using PeerJS
 
-let peerConnection = null;
-let dataChannel = null;
+let peer = null;
+let connection = null;
 let dotNetRef = null;
-
-const config = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
-        { urls: 'stun:stun.stunprotocol.org:3478' },
-        { urls: 'stun:stun.services.mozilla.com:3478' }
-    ]
-};
+let myPeerId = null;
 
 window.WebRtc = {
     initialize: function (dotNetReference) {
         dotNetRef = dotNetReference;
-        console.log('WebRTC initialized');
+        console.log('WebRTC (PeerJS) initialized');
     },
 
-    createOffer: async function () {
-        try {
-            peerConnection = new RTCPeerConnection(config);
-            setupPeerConnectionHandlers();
+    // ルームを作成（先手）- 短いルームIDを返す
+    createRoom: async function () {
+        return new Promise((resolve, reject) => {
+            // 6文字のランダムなルームIDを生成
+            const roomId = generateRoomId();
 
-            // Create data channel (only offerer creates it)
-            dataChannel = peerConnection.createDataChannel('shogi', {
-                ordered: true
+            peer = new Peer(roomId, {
+                debug: 2
             });
-            setupDataChannelHandlers();
 
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
+            peer.on('open', (id) => {
+                console.log('Room created with ID:', id);
+                myPeerId = id;
 
-            // Wait for ICE gathering to complete
-            await waitForIceGathering();
+                if (dotNetRef) {
+                    dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
+                }
 
-            const fullOffer = JSON.stringify(peerConnection.localDescription);
-            console.log('Offer created');
-            return fullOffer;
-        } catch (error) {
-            console.error('Error creating offer:', error);
-            throw error;
-        }
+                resolve(id);
+            });
+
+            peer.on('connection', (conn) => {
+                console.log('Peer connected:', conn.peer);
+                connection = conn;
+                setupConnectionHandlers();
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                if (err.type === 'unavailable-id') {
+                    // IDが既に使用されている場合は再試行
+                    peer.destroy();
+                    resolve(window.WebRtc.createRoom());
+                } else {
+                    reject(err);
+                }
+            });
+
+            peer.on('disconnected', () => {
+                console.log('Peer disconnected');
+                if (dotNetRef) {
+                    dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'disconnected');
+                }
+            });
+        });
     },
 
-    createAnswer: async function (offerJson) {
-        try {
-            peerConnection = new RTCPeerConnection(config);
-            setupPeerConnectionHandlers();
+    // ルームに参加（後手）
+    joinRoom: async function (roomId) {
+        return new Promise((resolve, reject) => {
+            peer = new Peer({
+                debug: 2
+            });
 
-            // Answer side receives data channel
-            peerConnection.ondatachannel = (event) => {
-                console.log('DataChannel received on answer side');
-                dataChannel = event.channel;
-                setupDataChannelHandlers();
-            };
+            peer.on('open', (id) => {
+                console.log('My peer ID:', id);
+                myPeerId = id;
 
-            const offer = JSON.parse(offerJson);
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                if (dotNetRef) {
+                    dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
+                }
 
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
+                // ルームに接続
+                connection = peer.connect(roomId, {
+                    reliable: true
+                });
 
-            // Wait for ICE gathering to complete
-            await waitForIceGathering();
+                setupConnectionHandlers();
+                resolve(true);
+            });
 
-            const fullAnswer = JSON.stringify(peerConnection.localDescription);
-            console.log('Answer created');
-            return fullAnswer;
-        } catch (error) {
-            console.error('Error creating answer:', error);
-            throw error;
-        }
-    },
+            peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                reject(err);
+            });
 
-    acceptAnswer: async function (answerJson) {
-        try {
-            const answer = JSON.parse(answerJson);
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            console.log('Answer accepted');
-            return true;
-        } catch (error) {
-            console.error('Error accepting answer:', error);
-            throw error;
-        }
+            peer.on('disconnected', () => {
+                console.log('Peer disconnected');
+                if (dotNetRef) {
+                    dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'disconnected');
+                }
+            });
+        });
     },
 
     sendMessage: function (message) {
-        if (dataChannel && dataChannel.readyState === 'open') {
-            dataChannel.send(message);
+        if (connection && connection.open) {
+            connection.send(message);
             console.log('Message sent:', message);
             return true;
         }
-        console.warn('DataChannel not ready');
+        console.warn('Connection not ready');
         return false;
     },
 
     getConnectionState: function () {
-        if (!peerConnection) return 'disconnected';
-        return peerConnection.connectionState || 'unknown';
+        if (!connection) return 'disconnected';
+        return connection.open ? 'connected' : 'connecting';
     },
 
     disconnect: function () {
-        if (dataChannel) {
-            dataChannel.close();
-            dataChannel = null;
+        if (connection) {
+            connection.close();
+            connection = null;
         }
-        if (peerConnection) {
-            peerConnection.close();
-            peerConnection = null;
+        if (peer) {
+            peer.destroy();
+            peer = null;
         }
+        myPeerId = null;
         console.log('Disconnected');
     }
 };
 
-function setupPeerConnectionHandlers() {
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            console.log('ICE candidate:', event.candidate.candidate);
-        }
-    };
-
-    peerConnection.onconnectionstatechange = () => {
-        console.log('Connection state:', peerConnection.connectionState);
-        if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnConnectionStateChanged', peerConnection.connectionState);
-        }
-    };
-
-    peerConnection.oniceconnectionstatechange = () => {
-        console.log('ICE connection state:', peerConnection.iceConnectionState);
-    };
-}
-
-function setupDataChannelHandlers() {
-    dataChannel.onopen = () => {
+function setupConnectionHandlers() {
+    connection.on('open', () => {
         console.log('DataChannel opened');
         if (dotNetRef) {
             dotNetRef.invokeMethodAsync('OnDataChannelOpen');
         }
-    };
+    });
 
-    dataChannel.onclose = () => {
+    connection.on('close', () => {
         console.log('DataChannel closed');
         if (dotNetRef) {
             dotNetRef.invokeMethodAsync('OnDataChannelClose');
         }
-    };
+    });
 
-    dataChannel.onmessage = (event) => {
-        console.log('Message received:', event.data);
+    connection.on('data', (data) => {
+        console.log('Message received:', data);
         if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnMessageReceived', event.data);
+            dotNetRef.invokeMethodAsync('OnMessageReceived', data);
         }
-    };
+    });
 
-    dataChannel.onerror = (error) => {
-        console.error('DataChannel error:', error);
-    };
+    connection.on('error', (err) => {
+        console.error('Connection error:', err);
+    });
 }
 
-function waitForIceGathering() {
-    return new Promise((resolve) => {
-        if (peerConnection.iceGatheringState === 'complete') {
-            resolve();
-            return;
-        }
-
-        const checkState = () => {
-            if (peerConnection.iceGatheringState === 'complete') {
-                peerConnection.removeEventListener('icegatheringstatechange', checkState);
-                resolve();
-            }
-        };
-
-        peerConnection.addEventListener('icegatheringstatechange', checkState);
-
-        // Timeout after 5 seconds
-        setTimeout(() => {
-            peerConnection.removeEventListener('icegatheringstatechange', checkState);
-            resolve();
-        }, 5000);
-    });
+function generateRoomId() {
+    // 6文字の英数字（紛らわしい文字を除外）
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
 }

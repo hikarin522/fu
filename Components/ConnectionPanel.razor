@@ -18,11 +18,11 @@
                 <div class="player-buttons">
                     <button class="btn primary large" @onclick="() => SelectPlayer(Player.Sente)">
                         先手（黒）
-                        <span class="hint">接続コードを生成します</span>
+                        <span class="hint">ルームを作成します</span>
                     </button>
                     <button class="btn primary large" @onclick="() => SelectPlayer(Player.Gote)">
                         後手（白）
-                        <span class="hint">相手のコードを入力します</span>
+                        <span class="hint">ルームに参加します</span>
                     </button>
                 </div>
             </div>
@@ -34,27 +34,22 @@
                     <h4>対局を開始する（先手）</h4>
                     <button class="btn secondary small" @onclick="ResetSelection">← 戻る</button>
 
-                    @if (string.IsNullOrEmpty(Offer))
+                    @if (string.IsNullOrEmpty(RoomId))
                     {
-                        <button class="btn primary" @onclick="CreateOffer" disabled="@IsProcessing">
-                            @(IsProcessing ? "生成中..." : "接続コードを生成")
+                        <button class="btn primary" @onclick="CreateRoom" disabled="@IsProcessing">
+                            @(IsProcessing ? "作成中..." : "ルームを作成")
                         </button>
                     }
 
-                    @if (!string.IsNullOrEmpty(Offer))
+                    @if (!string.IsNullOrEmpty(RoomId))
                     {
-                        <div class="code-section">
-                            <label>このコードを相手に送ってください：</label>
-                            <textarea readonly @bind="Offer" rows="4"></textarea>
-                            <button class="btn small" @onclick="() => CopyToClipboard(Offer)">コピー</button>
-                        </div>
-
-                        <div class="code-section">
-                            <label>相手からの応答コードを貼り付け：</label>
-                            <textarea @bind="Answer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
-                            <button class="btn primary" @onclick="AcceptAnswer" disabled="@(string.IsNullOrEmpty(Answer))">
-                                接続
-                            </button>
+                        <div class="room-code-section">
+                            <label>このルームコードを相手に伝えてください：</label>
+                            <div class="room-code-display">
+                                <span class="room-code">@RoomId</span>
+                                <button class="btn small" @onclick="() => CopyToClipboard(RoomId)">コピー</button>
+                            </div>
+                            <p class="hint">相手がこのコードを入力すると接続されます</p>
                         </div>
                     }
                 </div>
@@ -67,23 +62,18 @@
                     <h4>対局に参加する（後手）</h4>
                     <button class="btn secondary small" @onclick="ResetSelection">← 戻る</button>
 
-                    <div class="code-section">
-                        <label>相手からの接続コードを貼り付け：</label>
-                        <textarea @bind="ReceivedOffer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
-                        <button class="btn primary" @onclick="CreateAnswer" disabled="@(string.IsNullOrEmpty(ReceivedOffer) || IsProcessing)">
-                            @(IsProcessing ? "生成中..." : "応答コードを生成")
-                        </button>
-                    </div>
-
-                    @if (!string.IsNullOrEmpty(GeneratedAnswer))
-                    {
-                        <div class="code-section">
-                            <label>この応答コードを相手に送ってください：</label>
-                            <textarea readonly @bind="GeneratedAnswer" rows="4"></textarea>
-                            <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
-                            <p class="hint">相手がこのコードを入力すると接続されます</p>
+                    <div class="room-code-section">
+                        <label>相手から受け取ったルームコードを入力：</label>
+                        <div class="room-code-input">
+                            <input type="text" @bind="InputRoomId" @bind:event="oninput"
+                                   placeholder="例: ABC123" maxlength="6"
+                                   style="text-transform: uppercase;" />
+                            <button class="btn primary" @onclick="JoinRoom"
+                                    disabled="@(InputRoomId.Length < 6 || IsProcessing)">
+                                @(IsProcessing ? "接続中..." : "参加")
+                            </button>
                         </div>
-                    }
+                    </div>
                 </div>
             </div>
         }
@@ -91,40 +81,20 @@
 
     @if (ConnectionState == Services.ConnectionState.Connecting)
     {
-        @if (!string.IsNullOrEmpty(GeneratedAnswer))
-        {
-            <div class="code-section waiting-connection">
-                <p>相手の接続を待っています...</p>
-                <label>この応答コードを相手に送ってください：</label>
-                <textarea readonly @bind="GeneratedAnswer" rows="4"></textarea>
-                <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
-            </div>
-        }
-        else if (!string.IsNullOrEmpty(Offer))
-        {
-            <div class="waiting-connection">
-                <p>応答コードを入力してください</p>
-                <div class="code-section">
-                    <label>接続コード（相手に送ってください）：</label>
-                    <textarea readonly @bind="Offer" rows="4"></textarea>
-                    <button class="btn small" @onclick="() => CopyToClipboard(Offer)">コピー</button>
+        <div class="connecting">
+            @if (!string.IsNullOrEmpty(RoomId) && SelectedPlayer == Player.Sente)
+            {
+                <div class="room-code-section">
+                    <label>ルームコード：</label>
+                    <div class="room-code-display">
+                        <span class="room-code">@RoomId</span>
+                        <button class="btn small" @onclick="() => CopyToClipboard(RoomId)">コピー</button>
+                    </div>
                 </div>
-                <div class="code-section">
-                    <label>相手からの応答コードを貼り付け：</label>
-                    <textarea @bind="Answer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
-                    <button class="btn primary" @onclick="AcceptAnswer" disabled="@(string.IsNullOrEmpty(Answer))">
-                        接続
-                    </button>
-                </div>
-            </div>
-        }
-        else
-        {
-            <div class="connecting">
-                <div class="spinner"></div>
-                <p>接続中...</p>
-            </div>
-        }
+            }
+            <div class="spinner"></div>
+            <p>相手の接続を待っています...</p>
+        </div>
     }
 
     @if (ConnectionState == Services.ConnectionState.Connected)
@@ -149,10 +119,8 @@
     private ConnectionState ConnectionState => WebRtcService?.State ?? Services.ConnectionState.Disconnected;
 
     private Player? SelectedPlayer { get; set; }
-    private string Offer { get; set; } = "";
-    private string Answer { get; set; } = "";
-    private string ReceivedOffer { get; set; } = "";
-    private string GeneratedAnswer { get; set; } = "";
+    private string RoomId { get; set; } = "";
+    private string InputRoomId { get; set; } = "";
     private string ErrorMessage { get; set; } = "";
     private bool IsProcessing { get; set; }
     private bool HasNotifiedConnected { get; set; }
@@ -186,20 +154,20 @@
         });
     }
 
-    private async Task CreateOffer()
+    private async Task CreateRoom()
     {
         try
         {
             IsProcessing = true;
             ErrorMessage = "";
             StateHasChanged();
-            Offer = await WebRtcService.CreateOfferAsync();
-            await OnPlayerAssigned.InvokeAsync(SelectedPlayer == Player.Sente);
+            RoomId = await WebRtcService.CreateRoomAsync();
+            await OnPlayerAssigned.InvokeAsync(true);  // Sente
         }
         catch (Exception ex)
         {
             ErrorMessage = $"エラー: {ex.Message}";
-            Console.WriteLine($"CreateOffer error: {ex}");
+            Console.WriteLine($"CreateRoom error: {ex}");
         }
         finally
         {
@@ -208,53 +176,39 @@
         }
     }
 
-    private async Task CreateAnswer()
+    private async Task JoinRoom()
     {
         try
         {
             IsProcessing = true;
             ErrorMessage = "";
             StateHasChanged();
-            GeneratedAnswer = await WebRtcService.CreateAnswerAsync(ReceivedOffer);
-            await OnPlayerAssigned.InvokeAsync(SelectedPlayer == Player.Sente);
+            await WebRtcService.JoinRoomAsync(InputRoomId.ToUpperInvariant());
+            await OnPlayerAssigned.InvokeAsync(false);  // Gote
         }
         catch (Exception ex)
         {
             ErrorMessage = $"エラー: {ex.Message}";
-            Console.WriteLine($"CreateAnswer error: {ex}");
+            Console.WriteLine($"JoinRoom error: {ex}");
         }
         finally
         {
             IsProcessing = false;
             StateHasChanged();
-        }
-    }
-
-    private async Task AcceptAnswer()
-    {
-        try
-        {
-            ErrorMessage = "";
-            await WebRtcService.AcceptAnswerAsync(Answer);
-        }
-        catch (Exception ex)
-        {
-            ErrorMessage = $"エラー: {ex.Message}";
         }
     }
 
     private async Task Disconnect()
     {
         await WebRtcService.DisconnectAsync();
+        HasNotifiedConnected = false;
         ClearAll();
     }
 
     private void ClearAll()
     {
-        Offer = "";
-        Answer = "";
-        ReceivedOffer = "";
-        GeneratedAnswer = "";
+        RoomId = "";
+        InputRoomId = "";
         ErrorMessage = "";
     }
 

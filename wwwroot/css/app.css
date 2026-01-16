@@ -434,6 +434,69 @@ a, .btn-link {
     margin-top: 4px;
 }
 
+/* ルームコード表示 */
+.room-code-section {
+    margin-top: 16px;
+}
+
+.room-code-section label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #666;
+}
+
+.room-code-display {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    justify-content: center;
+}
+
+.room-code {
+    font-family: 'Courier New', monospace;
+    font-size: 2rem;
+    font-weight: bold;
+    letter-spacing: 0.3em;
+    padding: 12px 24px;
+    background: #f0f0f0;
+    border-radius: 8px;
+    border: 2px dashed #ccc;
+    color: #333;
+}
+
+.room-code-input {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+}
+
+.room-code-input input {
+    font-family: 'Courier New', monospace;
+    font-size: 1.5rem;
+    font-weight: bold;
+    letter-spacing: 0.2em;
+    padding: 12px 16px;
+    width: 180px;
+    text-align: center;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    text-transform: uppercase;
+}
+
+.room-code-input input:focus {
+    outline: none;
+    border-color: #2196f3;
+}
+
+.room-code-section .hint {
+    font-size: 12px;
+    color: #999;
+    margin-top: 8px;
+    text-align: center;
+}
+
 .waiting-connection {
     background: #fff;
     padding: 20px;
