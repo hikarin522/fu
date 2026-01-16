@@ -4,23 +4,20 @@
     <header class="game-header">
         <h1>将棋オンライン対戦</h1>
         <div class="game-info">
-            @if (GameService.State.Status == GameStatus.Playing)
+            @switch (GameService.State.Status)
             {
-                <span class="turn-indicator @(GameService.State.IsMyTurn ? "my-turn" : "opponent-turn")">
-                    @(GameService.State.IsMyTurn ? "あなたの番です" : "相手の番です")
-                </span>
-                @if (GameService.IsInCheck())
-                {
-                    <span class="check-indicator">王手！</span>
-                }
-            }
-            @if (GameService.State.Status == GameStatus.CheckmateSente)
-            {
-                <span class="game-result">先手の勝ち！</span>
-            }
-            @if (GameService.State.Status == GameStatus.CheckmateGote)
-            {
-                <span class="game-result">後手の勝ち！</span>
+                case GameStatus.Playing:
+                    <span class="turn-indicator @(GameService.State.IsMyTurn ? "my-turn" : "opponent-turn")">
+                        @(GameService.State.IsMyTurn ? "あなたの番です" : "相手の番です")
+                    </span>
+                    @if (GameService.IsInCheck())
+                    {
+                        <span class="check-indicator">王手！</span>
+                    }
+                    break;
+                case var status when status.GetResultMessage() is { } message:
+                    <span class="game-result">@message</span>
+                    break;
             }
         </div>
     </header>

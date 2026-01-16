@@ -13,6 +13,17 @@ public record Board
     public Piece? this[int col, int row] => this._squares[col * Size + row];
     public Piece? this[Position pos] => this._squares[pos.Col * Size + pos.Row];
 
+    /// <summary>全マス位置を列挙</summary>
+    public static IEnumerable<Position> AllPositions {
+        get {
+            for (var col = 0; col < Size; col++) {
+                for (var row = 0; row < Size; row++) {
+                    yield return new Position(col, row);
+                }
+            }
+        }
+    }
+
     private Board(ImmutableArray<Piece?> squares) => this._squares = squares;
 
     /// <summary>初期配置の盤面を作成</summary>
@@ -74,38 +85,17 @@ public record Board
     }
 
     /// <summary>指定プレイヤーの王の位置を検索</summary>
-    public Position? FindKing(Player player)
-    {
-        for (var col = 0; col < Size; col++) {
-            for (var row = 0; row < Size; row++) {
-                if (this._squares[col * Size + row] is { Type: PieceType.King, Owner: var owner } && owner == player) {
-                    return new Position(col, row);
-                }
-            }
-        }
-        return null;
-    }
+    public Position? FindKing(Player player) =>
+        AllPositions.FirstOrDefault(pos => this[pos] is { Type: PieceType.King } piece && piece.Owner == player);
 
     /// <summary>指定プレイヤーの全駒を列挙（nullなら全プレイヤー）</summary>
-    public IEnumerable<(Position pos, Piece piece)> GetAllPieces(Player? player = null)
-    {
-        for (var col = 0; col < Size; col++) {
-            for (var row = 0; row < Size; row++) {
-                if (this._squares[col * Size + row] is { } piece && (player is null || piece.Owner == player)) {
-                    yield return (new Position(col, row), piece);
-                }
-            }
-        }
-    }
+    public IEnumerable<(Position pos, Piece piece)> GetAllPieces(Player? player = null) =>
+        AllPositions
+            .Select(pos => (pos, piece: this[pos]))
+            .Where(x => x.piece is not null && (player is null || x.piece.Owner == player))
+            .Select(x => (x.pos, x.piece!));
 
     /// <summary>指定列に歩があるか（二歩チェック用）</summary>
-    public bool HasPawnInColumn(int col, Player player)
-    {
-        for (var row = 0; row < Size; row++) {
-            if (this._squares[col * Size + row] is { Type: PieceType.Pawn, Owner: var owner } && owner == player) {
-                return true;
-            }
-        }
-        return false;
-    }
+    public bool HasPawnInColumn(int col, Player player) =>
+        Enumerable.Range(0, Size).Any(row => this[col, row] is { Type: PieceType.Pawn } piece && piece.Owner == player);
 }

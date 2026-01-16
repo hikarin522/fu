@@ -11,6 +11,34 @@ public enum GameStatus
     Resign
 }
 
+public static class GameStatusExtensions
+{
+    /// <summary>ゲームが終了しているか</summary>
+    public static bool IsGameOver(this GameStatus status) =>
+        status is GameStatus.CheckmateSente or GameStatus.CheckmateGote or GameStatus.Resign;
+
+    /// <summary>勝者を取得（終了していない場合はnull）</summary>
+    public static Player? GetWinner(this GameStatus status) => status switch {
+        GameStatus.CheckmateSente => Player.Sente,
+        GameStatus.CheckmateGote => Player.Gote,
+        _ => null
+    };
+
+    /// <summary>勝者の勝利メッセージを取得</summary>
+    public static string? GetResultMessage(this GameStatus status) => status switch {
+        GameStatus.CheckmateSente => "先手の勝ち！",
+        GameStatus.CheckmateGote => "後手の勝ち！",
+        _ => null
+    };
+
+    /// <summary>プレイヤーの勝利ステータスを取得</summary>
+    public static GameStatus GetWinStatus(this Player player) => player switch {
+        Player.Sente => GameStatus.CheckmateSente,
+        Player.Gote => GameStatus.CheckmateGote,
+        _ => throw new ArgumentException("Invalid player for win status", nameof(player))
+    };
+}
+
 /// <summary>
 /// 持ち駒を管理する不変レコード
 /// </summary>

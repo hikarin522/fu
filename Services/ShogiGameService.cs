@@ -41,43 +41,34 @@ public class ShogiGameService
         return [.. moves.Where(to => !WouldBeInCheck(this.State.Board, from, to, this.State.CurrentPlayer))];
     }
 
-    public List<Position> GetLegalDropPositions(PieceType pieceType)
+    public List<Position> GetLegalDropPositions(PieceType pieceType) =>
+        [.. Board.AllPositions.Where(pos => this.CanDropAt(pos, pieceType))];
+
+    private bool CanDropAt(Position pos, PieceType pieceType)
     {
-        List<Position> positions = [];
-
-        for (var col = 0; col < Board.Size; col++) {
-            for (var row = 0; row < Board.Size; row++) {
-                var pos = new Position(col, row);
-                if (this.State.Board[pos] is not null) {
-                    continue;
-                }
-
-                // 二歩チェック
-                if (pieceType == PieceType.Pawn && this.State.Board.HasPawnInColumn(col, this.State.CurrentPlayer)) {
-                    continue;
-                }
-
-                // 行きどころのない駒チェック
-                if (!CanExistAtRow(pieceType, row, this.State.CurrentPlayer)) {
-                    continue;
-                }
-
-                // 打ち歩詰めチェック
-                if (pieceType == PieceType.Pawn && this.WouldBePawnDropMate(pos)) {
-                    continue;
-                }
-
-                // 王手回避チェック：打った後も王手状態なら打てない
-                var testBoard = this.State.Board.SetPiece(pos, new Piece(pieceType, this.State.CurrentPlayer));
-                if (IsInCheck(testBoard, this.State.CurrentPlayer)) {
-                    continue;
-                }
-
-                positions.Add(pos);
-            }
+        // 空きマスでなければ打てない
+        if (this.State.Board[pos] is not null) {
+            return false;
         }
 
-        return positions;
+        // 二歩チェック
+        if (pieceType == PieceType.Pawn && this.State.Board.HasPawnInColumn(pos.Col, this.State.CurrentPlayer)) {
+            return false;
+        }
+
+        // 行きどころのない駒チェック
+        if (!CanExistAtRow(pieceType, pos.Row, this.State.CurrentPlayer)) {
+            return false;
+        }
+
+        // 打ち歩詰めチェック
+        if (pieceType == PieceType.Pawn && this.WouldBePawnDropMate(pos)) {
+            return false;
+        }
+
+        // 王手回避チェック：打った後も王手状態なら打てない
+        var testBoard = this.State.Board.SetPiece(pos, new Piece(pieceType, this.State.CurrentPlayer));
+        return !IsInCheck(testBoard, this.State.CurrentPlayer);
     }
 
     private static bool CanExistAtRow(PieceType type, int row, Player player)
@@ -177,9 +168,7 @@ public class ShogiGameService
                 this.State = this.State with {
                     Board = this.State.Board.MovePiece(from, to),
                     MoveHistory = this.State.MoveHistory.Add(move),
-                    Status = this.State.CurrentPlayer == Player.Sente
-                        ? GameStatus.CheckmateSente
-                        : GameStatus.CheckmateGote
+                    Status = this.State.CurrentPlayer.GetWinStatus()
                 };
                 this.State = this.State.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
                 OnStateChanged?.Invoke();
@@ -399,16 +388,8 @@ public class ShogiGameService
             return false;
         }
 
-        var opponent = player.GetOpponent();
-
-        foreach (var (pos, piece) in board.GetAllPieces(opponent)) {
-            var moves = GetPossibleMovesOnBoard(board, pos, piece);
-            if (moves.Contains(kingPos.Value)) {
-                return true;
-            }
-        }
-
-        return false;
+        return board.GetAllPieces(player.GetOpponent())
+            .Any(x => GetPossibleMovesOnBoard(board, x.pos, x.piece).Contains(kingPos.Value));
     }
 
     public bool IsInCheck() => IsInCheck(this.State.Board, this.State.CurrentPlayer);
@@ -434,9 +415,7 @@ public class ShogiGameService
 
         // 合法手がない = 詰み（詰まされた側の負け = 相手の勝ち）
         this.State = this.State with {
-            Status = currentPlayer.GetOpponent() == Player.Sente
-                ? GameStatus.CheckmateSente
-                : GameStatus.CheckmateGote
+            Status = currentPlayer.GetOpponent().GetWinStatus()
         };
         OnStateChanged?.Invoke();
     }
@@ -444,9 +423,7 @@ public class ShogiGameService
     public void Resign()
     {
         this.State = this.State with {
-            Status = this.State.CurrentPlayer.GetOpponent() == Player.Sente
-                ? GameStatus.CheckmateSente
-                : GameStatus.CheckmateGote
+            Status = this.State.CurrentPlayer.GetOpponent().GetWinStatus()
         };
         OnStateChanged?.Invoke();
     }
