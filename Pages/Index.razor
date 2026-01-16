@@ -140,13 +140,16 @@
 
     private async Task OnMoveMade(Move move)
     {
+        Console.WriteLine($"OnMoveMade: {move.ToNotation()}, sending to opponent");
         await WebRtcService.SendMoveAsync(move);
         StateHasChanged();
     }
 
     private void OnRemoteMoveReceived(Move move)
     {
+        Console.WriteLine($"OnRemoteMoveReceived: {move.ToNotation()}");
         GameService.ApplyRemoteMove(move);
+        Console.WriteLine($"After ApplyRemoteMove: CurrentPlayer={GameService.State.CurrentPlayer}");
         InvokeAsync(StateHasChanged);
     }
 

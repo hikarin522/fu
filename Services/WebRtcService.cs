@@ -60,6 +60,7 @@ public class WebRtcService : IAsyncDisposable
             Type = "move",
             Move = move
         });
+        Console.WriteLine($"SendMoveAsync: sending {json}");
         await _jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 

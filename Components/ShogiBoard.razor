@@ -49,7 +49,9 @@
                                  @onclick="() => OnCellClick(pos)" @onclick:stopPropagation="true">
                                 @if (piece != null)
                                 {
-                                    <div class="piece @(piece.Owner == Player.Gote ? "gote" : "") @(piece.IsPromoted ? "promoted" : "")">
+                                    @* 後手視点(IsFlipped)では先手の駒を逆さま、先手視点では後手の駒を逆さまに *@
+                                    var isUpsideDown = IsFlipped ? piece.Owner == Player.Sente : piece.Owner == Player.Gote;
+                                    <div class="piece @(isUpsideDown ? "gote" : "") @(piece.IsPromoted ? "promoted" : "")">
                                         @piece.GetDisplayChar()
                                     </div>
                                 }
