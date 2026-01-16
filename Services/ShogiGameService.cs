@@ -122,6 +122,7 @@ public class ShogiGameService
 
     public bool TryMakeMove(Move move)
     {
+        Console.WriteLine($"TryMakeMove: Status={State.Status}, IsDrop={move.IsDrop}");
         if (State.Status != GameStatus.Playing)
             return false;
 
@@ -136,10 +137,12 @@ public class ShogiGameService
         var to = move.To;
         var piece = State.Board[from];
 
+        Console.WriteLine($"TryMakeMove: from=({from.Col},{from.Row}) piece={piece?.Type} owner={piece?.Owner} currentPlayer={State.CurrentPlayer}");
         if (piece == null || piece.Owner != State.CurrentPlayer)
             return false;
 
         var legalMoves = GetLegalMoves(from);
+        Console.WriteLine($"TryMakeMove: legalMoves.Count={legalMoves.Count}, to=({to.Col},{to.Row})");
         if (!legalMoves.Contains(to))
             return false;
 
@@ -195,8 +198,10 @@ public class ShogiGameService
 
     public void ApplyRemoteMove(Move move)
     {
+        Console.WriteLine($"ApplyRemoteMove: From=({move.From?.Col},{move.From?.Row}) To=({move.To.Col},{move.To.Row}) CurrentPlayer={State.CurrentPlayer}");
         move.Player = State.CurrentPlayer;
-        TryMakeMove(move);
+        var result = TryMakeMove(move);
+        Console.WriteLine($"ApplyRemoteMove: TryMakeMove returned {result}");
     }
 
     public bool CanPromote(Position from, Position to)
