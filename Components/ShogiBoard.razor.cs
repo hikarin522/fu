@@ -22,9 +22,23 @@ public partial class ShogiBoard
     private PieceType? SelectedDropPiece { get; set; }
     private List<Position> DropLegalMoves { get; set; } = [];
 
+    // 閲覧モード用の表示盤面
+    private Board DisplayBoard => this.State.IsReviewing
+        ? this.GameService.GetBoardAtMove(this.State.DisplayMoveIndex).board
+        : this.State.Board;
+
+    private CapturedPieces DisplaySenteCaptured => this.State.IsReviewing
+        ? this.GameService.GetBoardAtMove(this.State.DisplayMoveIndex).senteCaptured
+        : this.State.SenteCaptured;
+
+    private CapturedPieces DisplayGoteCaptured => this.State.IsReviewing
+        ? this.GameService.GetBoardAtMove(this.State.DisplayMoveIndex).goteCaptured
+        : this.State.GoteCaptured;
+
     private async Task OnCellClickAsync(Position pos)
     {
-        if (this.State.Status != GameStatus.Playing || !this.State.IsMyTurn) {
+        // 閲覧モード中は操作無効
+        if (this.State.IsReviewing || this.State.Status != GameStatus.Playing || !this.State.IsMyTurn) {
             return;
         }
 
@@ -81,7 +95,8 @@ public partial class ShogiBoard
 
     private void OnCapturedPieceClick(PieceType pieceType)
     {
-        if (this.State.Status != GameStatus.Playing || !this.State.IsMyTurn) {
+        // 閲覧モード中は操作無効
+        if (this.State.IsReviewing || this.State.Status != GameStatus.Playing || !this.State.IsMyTurn) {
             return;
         }
 
@@ -137,9 +152,11 @@ public partial class ShogiBoard
 
     private bool IsLastMovePosition(Position pos)
     {
-        if (this.State.MoveHistory is not [.., var lastMove]) {
+        var displayIndex = this.State.DisplayMoveIndex;
+        if (displayIndex == 0 || displayIndex > this.State.MoveHistory.Count) {
             return false;
         }
+        var lastMove = this.State.MoveHistory[displayIndex - 1];
         return lastMove.To == pos || (lastMove.From is { } from && from == pos);
     }
 }

@@ -14,3 +14,8 @@ public sealed record MoveMessage(MoveDto Move) : WebRtcMessage("move");
 /// ゲーム開始メッセージ
 /// </summary>
 public sealed record GameStartMessage() : WebRtcMessage("gameStart");
+
+/// <summary>
+/// 対局者指定付きゲーム開始メッセージ
+/// </summary>
+public sealed record GameStartWithPlayersMessage(string SentePeerId, string GotePeerId) : WebRtcMessage("gameStartWithPlayers");

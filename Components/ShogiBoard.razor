@@ -1,6 +1,6 @@
 <div class="shogi-container">
     <CapturedPiecesPanel
-        Pieces="@(IsFlipped ? State.SenteCaptured : State.GoteCaptured)"
+        Pieces="@(IsFlipped ? DisplaySenteCaptured : DisplayGoteCaptured)"
         Player="@(IsFlipped ? Player.Sente : Player.Gote)"
         IsOpponent="true"
         OnPieceSelected="OnCapturedPieceClick"
@@ -36,7 +36,7 @@
                         {
                             var displayCol = IsFlipped ? c : 8 - c;
                             var pos = new Position(displayCol, displayRow);
-                            var piece = State.Board[pos];
+                            var piece = DisplayBoard[pos];
                             var isSelected = SelectedPosition == pos;
                             var isLegalMove = LegalMoves.Contains(pos);
                             var isLastMove = IsLastMovePosition(pos);
@@ -65,7 +65,7 @@
     </div>
 
     <CapturedPiecesPanel
-        Pieces="@(IsFlipped ? State.GoteCaptured : State.SenteCaptured)"
+        Pieces="@(IsFlipped ? DisplayGoteCaptured : DisplaySenteCaptured)"
         Player="@(IsFlipped ? Player.Gote : Player.Sente)"
         IsOpponent="false"
         OnPieceSelected="OnCapturedPieceClick"

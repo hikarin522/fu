@@ -424,4 +424,102 @@ public class ShogiGameService
         };
         await this.NotifyStateChangedAsync();
     }
+
+    /// <summary>棋譜を1手戻る</summary>
+    public async Task GoBackAsync()
+    {
+        var currentIndex = this.State.DisplayMoveIndex;
+        if (currentIndex > 0) {
+            this.State = this.State with { ViewingMoveIndex = currentIndex - 1 };
+            await this.NotifyStateChangedAsync();
+        }
+    }
+
+    /// <summary>棋譜を1手進む</summary>
+    public async Task GoForwardAsync()
+    {
+        var currentIndex = this.State.DisplayMoveIndex;
+        if (currentIndex < this.State.MoveHistory.Count) {
+            var newIndex = currentIndex + 1;
+            // 最新手に戻った場合はnullに
+            this.State = this.State with {
+                ViewingMoveIndex = newIndex == this.State.MoveHistory.Count ? null : newIndex
+            };
+            await this.NotifyStateChangedAsync();
+        }
+    }
+
+    /// <summary>最新の局面に戻る</summary>
+    public async Task GoToLatestAsync()
+    {
+        if (this.State.IsReviewing) {
+            this.State = this.State with { ViewingMoveIndex = null };
+            await this.NotifyStateChangedAsync();
+        }
+    }
+
+    /// <summary>指定した手数に移動する</summary>
+    public async Task SetViewingMoveIndexAsync(int moveIndex)
+    {
+        var newIndex = moveIndex >= this.State.MoveHistory.Count ? null : (int?)moveIndex;
+        if (this.State.ViewingMoveIndex != newIndex) {
+            this.State = this.State with { ViewingMoveIndex = newIndex };
+            await this.NotifyStateChangedAsync();
+        }
+    }
+
+    /// <summary>指定した手数の盤面状態を再構築する</summary>
+    public (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) GetBoardAtMove(int moveIndex)
+    {
+        var board = new Board();
+        var senteCaptured = CapturedPieces.Empty;
+        var goteCaptured = CapturedPieces.Empty;
+        var currentPlayer = Player.Sente;
+
+        for (var i = 0; i < moveIndex && i < this.State.MoveHistory.Count; i++) {
+            var move = this.State.MoveHistory[i];
+            (board, senteCaptured, goteCaptured) = ApplyMove(board, move, currentPlayer, senteCaptured, goteCaptured);
+            currentPlayer = currentPlayer.GetOpponent();
+        }
+
+        return (board, senteCaptured, goteCaptured, currentPlayer);
+    }
+
+    private static (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured) ApplyMove(
+        Board board, Move move, Player player, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
+    {
+        var captured = player == Player.Sente ? senteCaptured : goteCaptured;
+
+        if (move.IsDrop) {
+            // 駒を打つ
+            var newCaptured = captured.TryRemove(move.PieceType) ?? captured;
+            board = board.SetPiece(move.To, new Piece(move.PieceType, player));
+
+            return player == Player.Sente
+                ? (board, newCaptured, goteCaptured)
+                : (board, senteCaptured, newCaptured);
+        }
+
+        // 駒を動かす
+        if (move.From is { } from) {
+            var piece = board[from];
+            if (piece is not null) {
+                // 取った駒を持ち駒に追加
+                if (move.CapturedPiece is { } capturedType) {
+                    captured = captured.Add(capturedType);
+                }
+
+                // 成りの処理
+                var newPiece = move.IsPromotion && piece.Type.CanPromote()
+                    ? piece with { Type = piece.Type.GetPromotedType() }
+                    : piece;
+
+                board = board.MovePiece(from, move.To, newPiece);
+            }
+        }
+
+        return player == Player.Sente
+            ? (board, captured, goteCaptured)
+            : (board, senteCaptured, captured);
+    }
 }

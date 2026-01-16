@@ -79,7 +79,8 @@ public record GameState(
     CapturedPieces SenteCaptured,
     CapturedPieces GoteCaptured,
     ImmutableList<Move> MoveHistory,
-    Player LocalPlayer)
+    Player LocalPlayer,
+    int? ViewingMoveIndex = null)
 {
     public static GameState Initial => new(
         new Board(),
@@ -96,6 +97,12 @@ public record GameState(
 
     /// <summary>自分の手番かどうか</summary>
     public bool IsMyTurn => this.LocalPlayer == this.CurrentPlayer;
+
+    /// <summary>棋譜閲覧モード中かどうか（最新手以外を表示中）</summary>
+    public bool IsReviewing => this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count;
+
+    /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
+    public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.MoveHistory.Count;
 
     /// <summary>手番を交代した新しい状態を返す</summary>
     public GameState SwitchPlayer() =>

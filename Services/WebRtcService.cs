@@ -22,18 +22,29 @@ public enum ConnectionState
     Connected
 }
 
+/// <summary>ルーム参加者の情報</summary>
+public record Participant(string PeerId, string Nickname, bool IsHost);
+
 public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 {
     private DotNetObjectReference<WebRtcService>? _dotNetRef;
     private bool _dataChannelOpen;
+    private readonly Dictionary<string, Participant> _participants = [];
 
     public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
-    public bool IsConnected => this.State == ConnectionState.Connected && this._dataChannelOpen;
+    public bool IsConnected => this.State == ConnectionState.Connected || this._dataChannelOpen;
+    public bool IsHost { get; private set; }
+    public string? MyPeerId { get; private set; }
+    public string? MyNickname { get; private set; }
+    public IReadOnlyCollection<Participant> Participants => this._participants.Values;
 
     public event Func<Move, Task>? OnMoveReceived;
     public event Func<ConnectionState, Task>? OnStateChanged;
     public event Func<Task>? OnGameStart;
     public event Func<Task>? OnDataChannelReady;
+    public event Func<Participant, Task>? OnParticipantJoined;
+    public event Func<string, Task>? OnParticipantLeft;
+    public event Func<GameStartInfo, Task>? OnGameStartWithPlayers;
 
     public async Task InitializeAsync()
     {
@@ -41,20 +52,35 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         await jsRuntime.InvokeVoidAsync("WebRtc.initialize", this._dotNetRef);
     }
 
-    /// <summary>ルームを作成（先手用）- 6文字のルームIDを返す</summary>
-    public async Task<RoomId> CreateRoomAsync()
+    /// <summary>ルームを作成（ホスト用）- 6文字のルームIDを返す</summary>
+    public async Task<RoomId> CreateRoomAsync(string nickname)
     {
-        var id = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom");
+        this.IsHost = true;
+        this.MyNickname = nickname;
+        var id = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom", nickname);
+        this.MyPeerId = id;
         return new RoomId(id);
     }
 
-    /// <summary>ルームに参加（後手用）</summary>
-    public async Task JoinRoomAsync(RoomId roomId) =>
-        await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId.AsPrimitive());
+    /// <summary>ルームに参加</summary>
+    public async Task JoinRoomAsync(RoomId roomId, string nickname)
+    {
+        this.IsHost = false;
+        this.MyNickname = nickname;
+        await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId.AsPrimitive(), nickname);
+        this.MyPeerId = await jsRuntime.InvokeAsync<string>("WebRtc.getMyPeerId");
+    }
 
     public async Task SendMoveAsync(Move move)
     {
         var message = new MoveMessage(move.ToDto());
+        var json = JsonSerializer.Serialize(message, JsonConfig.Options);
+        await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
+    }
+
+    public async Task SendGameStartAsync(string sentePeerId, string gotePeerId)
+    {
+        var message = new GameStartWithPlayersMessage(sentePeerId, gotePeerId);
         var json = JsonSerializer.Serialize(message, JsonConfig.Options);
         await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
@@ -105,6 +131,27 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     }
 
     [JSInvokable]
+    public async Task OnParticipantJoinedCallback(string peerId, string nickname, bool isHost)
+    {
+        var participant = new Participant(peerId, nickname, isHost);
+        this._participants[peerId] = participant;
+
+        if (OnParticipantJoined is { } handler) {
+            await handler(participant);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnParticipantLeftCallback(string peerId)
+    {
+        this._participants.Remove(peerId);
+
+        if (OnParticipantLeft is { } handler) {
+            await handler(peerId);
+        }
+    }
+
+    [JSInvokable]
     public async Task OnMessageReceived(string message)
     {
         try {
@@ -127,6 +174,15 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                         await startHandler();
                     }
                     break;
+
+                case "gameStartWithPlayers":
+                    var gsMessage = JsonSerializer.Deserialize<GameStartWithPlayersMessage>(message, JsonConfig.Options);
+                    if (gsMessage is not null && OnGameStartWithPlayers is { } gsHandler) {
+                        var senteNickname = this._participants.GetValueOrDefault(gsMessage.SentePeerId)?.Nickname ?? "先手";
+                        var goteNickname = this._participants.GetValueOrDefault(gsMessage.GotePeerId)?.Nickname ?? "後手";
+                        await gsHandler(new GameStartInfo(gsMessage.SentePeerId, gsMessage.GotePeerId, senteNickname, goteNickname));
+                    }
+                    break;
             }
         }
         catch (JsonException) {
@@ -137,6 +193,10 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public async Task DisconnectAsync()
     {
         await jsRuntime.InvokeVoidAsync("WebRtc.disconnect");
+        this._participants.Clear();
+        this.IsHost = false;
+        this.MyPeerId = null;
+        this.MyNickname = null;
         await this.SetStateAsync(ConnectionState.Disconnected);
     }
 
@@ -147,3 +207,6 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         GC.SuppressFinalize(this);
     }
 }
+
+/// <summary>対局開始情報</summary>
+public record GameStartInfo(string SentePeerId, string GotePeerId, string SenteNickname, string GoteNickname);

@@ -1,5 +1,5 @@
 <div class="connection-panel">
-    <h3>P2P接続</h3>
+    <h3>ルーム接続</h3>
 
     <div class="connection-status">
         状態: <span class="status-@ConnectionState.ToString().ToLower()">@GetStatusText()</span>
@@ -7,59 +7,37 @@
 
     @if (ConnectionState == Services.ConnectionState.Disconnected)
     {
-        @if (!SelectedPlayer.HasValue)
+        @if (string.IsNullOrEmpty(Nickname))
         {
-            <div class="player-selection">
-                <h4>あなたの手番を選択してください</h4>
-                <div class="player-buttons">
-                    <button class="btn primary large" @onclick="() => SelectPlayer(Player.Sente)">
-                        先手（黒）
-                        <span class="hint">ルームを作成します</span>
+            <div class="nickname-section">
+                <h4>ニックネームを入力してください</h4>
+                <div class="nickname-input">
+                    <input type="text" @bind="InputNickname" @bind:event="oninput"
+                           placeholder="ニックネーム" maxlength="20" />
+                </div>
+                <div class="connection-buttons">
+                    <button class="btn primary large" @onclick="CreateRoomWithNickname"
+                            disabled="@(InputNickname.Length < 1 || IsProcessing)">
+                        @(IsProcessing ? "作成中..." : "ルームを作成")
+                        <span class="hint">ホストとして参加</span>
                     </button>
-                    <button class="btn primary large" @onclick="() => SelectPlayer(Player.Gote)">
-                        後手（白）
-                        <span class="hint">ルームに参加します</span>
+                    <button class="btn secondary large" @onclick="ShowJoinForm"
+                            disabled="@(InputNickname.Length < 1)">
+                        ルームに参加
+                        <span class="hint">コードを入力して参加</span>
                     </button>
                 </div>
             </div>
         }
-        else if (SelectedPlayer == Player.Sente)
+        else if (IsJoiningRoom)
         {
             <div class="connection-options">
                 <div class="option-section">
-                    <h4>対局を開始する（先手）</h4>
-                    <button class="btn secondary small" @onclick="ResetSelection">← 戻る</button>
-
-                    @if (string.IsNullOrEmpty(RoomId))
-                    {
-                        <button class="btn primary" @onclick="CreateRoom" disabled="@IsProcessing">
-                            @(IsProcessing ? "作成中..." : "ルームを作成")
-                        </button>
-                    }
-
-                    @if (!string.IsNullOrEmpty(RoomId))
-                    {
-                        <div class="room-code-section">
-                            <label>このルームコードを相手に伝えてください：</label>
-                            <div class="room-code-display">
-                                <span class="room-code">@RoomId</span>
-                                <button class="btn small" @onclick="() => CopyToClipboard(RoomId)">コピー</button>
-                            </div>
-                            <p class="hint">相手がこのコードを入力すると接続されます</p>
-                        </div>
-                    }
-                </div>
-            </div>
-        }
-        else if (SelectedPlayer == Player.Gote)
-        {
-            <div class="connection-options">
-                <div class="option-section">
-                    <h4>対局に参加する（後手）</h4>
-                    <button class="btn secondary small" @onclick="ResetSelection">← 戻る</button>
+                    <h4>ルームに参加（@Nickname）</h4>
+                    <button class="btn secondary small" @onclick="ResetAll">← 戻る</button>
 
                     <div class="room-code-section">
-                        <label>相手から受け取ったルームコードを入力：</label>
+                        <label>ルームコードを入力：</label>
                         <div class="room-code-input">
                             <input type="text" @bind="InputRoomId" @bind:event="oninput"
                                    placeholder="例: ABC123" maxlength="6"
@@ -75,28 +53,55 @@
         }
     }
 
-    @if (ConnectionState == Services.ConnectionState.Connecting)
+    @if (ConnectionState == Services.ConnectionState.Connecting && WebRtcService.IsHost)
     {
         <div class="connecting">
-            @if (!string.IsNullOrEmpty(RoomId) && SelectedPlayer == Player.Sente)
-            {
-                <div class="room-code-section">
-                    <label>ルームコード：</label>
-                    <div class="room-code-display">
-                        <span class="room-code">@RoomId</span>
-                        <button class="btn small" @onclick="() => CopyToClipboard(RoomId)">コピー</button>
-                    </div>
+            <div class="room-code-section">
+                <label>ルームコード：</label>
+                <div class="room-code-display">
+                    <span class="room-code">@RoomId</span>
+                    <button class="btn small" @onclick="() => CopyToClipboard(RoomId)">コピー</button>
                 </div>
-            }
+                <p class="hint">このコードを共有してください</p>
+            </div>
             <div class="spinner"></div>
-            <p>相手の接続を待っています...</p>
+            <p>参加者を待っています...</p>
+        </div>
+    }
+    else if (ConnectionState == Services.ConnectionState.Connecting && !WebRtcService.IsHost)
+    {
+        <div class="connecting">
+            <div class="spinner"></div>
+            <p>接続中...</p>
         </div>
     }
 
-    @if (ConnectionState == Services.ConnectionState.Connected)
+    @if (ConnectionState == Services.ConnectionState.Connected || WebRtcService.Participants.Count > 0)
     {
-        <div class="connected">
-            <p>接続完了！</p>
+        <div class="room-info">
+            @if (!string.IsNullOrEmpty(RoomId))
+            {
+                <div class="room-code-section compact">
+                    <label>ルームコード：</label>
+                    <span class="room-code small">@RoomId</span>
+                    <button class="btn small" @onclick="() => CopyToClipboard(RoomId)">コピー</button>
+                </div>
+            }
+
+            <div class="participants-section">
+                <h4>参加者 (@WebRtcService.Participants.Count)</h4>
+                <ul class="participants-list">
+                    @foreach (var p in WebRtcService.Participants)
+                    {
+                        <li class="@(p.PeerId == WebRtcService.MyPeerId ? "me" : "")">
+                            @p.Nickname
+                            @if (p.IsHost) { <span class="badge host">ホスト</span> }
+                            @if (p.PeerId == WebRtcService.MyPeerId) { <span class="badge me">(自分)</span> }
+                        </li>
+                    }
+                </ul>
+            </div>
+
             <button class="btn danger" @onclick="Disconnect">切断</button>
         </div>
     }

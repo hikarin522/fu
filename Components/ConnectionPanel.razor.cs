@@ -10,31 +10,26 @@ public partial class ConnectionPanel : IDisposable
 {
     [Parameter] public WebRtcService WebRtcService { get; set; } = null!;
     [Parameter] public EventCallback OnConnected { get; set; }
-    [Parameter] public EventCallback<bool> OnPlayerAssigned { get; set; }
 
     [Inject] private IJSRuntime JS { get; set; } = null!;
 
     private ConnectionState ConnectionState => this.WebRtcService?.State ?? ConnectionState.Disconnected;
 
-    private Player? SelectedPlayer { get; set; }
+    private string Nickname { get; set; } = "";
+    private string InputNickname { get; set; } = "";
     private string RoomId { get; set; } = "";
     private string InputRoomId { get; set; } = "";
     private string ErrorMessage { get; set; } = "";
     private bool IsProcessing { get; set; }
     private bool HasNotifiedConnected { get; set; }
-
-    private void SelectPlayer(Player player) => this.SelectedPlayer = player;
-
-    private void ResetSelection()
-    {
-        this.SelectedPlayer = null;
-        this.ClearAll();
-    }
+    private bool IsJoiningRoom { get; set; }
 
     protected override void OnInitialized()
     {
         if (this.WebRtcService is not null) {
             this.WebRtcService.OnStateChanged += this.OnStateChangedAsync;
+            this.WebRtcService.OnParticipantJoined += this.OnParticipantChangedAsync;
+            this.WebRtcService.OnParticipantLeft += this.OnParticipantLeftAsync;
         }
     }
 
@@ -49,17 +44,34 @@ public partial class ConnectionPanel : IDisposable
         });
     }
 
-    private Task CreateRoom() => this.ExecuteWithProcessing(async () => {
-        this.RoomId = (await this.WebRtcService.CreateRoomAsync()).AsPrimitive();
-        await this.OnPlayerAssigned.InvokeAsync(true);  // Sente
+    private Task OnParticipantChangedAsync(Participant participant)
+    {
+        return this.InvokeAsync(this.StateHasChanged);
+    }
+
+    private Task OnParticipantLeftAsync(string peerId)
+    {
+        return this.InvokeAsync(this.StateHasChanged);
+    }
+
+    private void ShowJoinForm()
+    {
+        this.Nickname = this.InputNickname.Trim();
+        this.IsJoiningRoom = true;
+    }
+
+    private Task CreateRoomWithNickname() => this.ExecuteWithProcessing(async () => {
+        this.Nickname = this.InputNickname.Trim();
+        this.RoomId = (await this.WebRtcService.CreateRoomAsync(this.Nickname)).AsPrimitive();
     });
 
     private Task JoinRoom() => this.ExecuteWithProcessing(async () => {
         if (string.IsNullOrWhiteSpace(this.InputRoomId)) {
             throw new InvalidOperationException("ルームIDを入力してください");
         }
-        await this.WebRtcService.JoinRoomAsync(new RoomId(this.InputRoomId.Trim().ToUpperInvariant()));
-        await this.OnPlayerAssigned.InvokeAsync(false);  // Gote
+        await this.WebRtcService.JoinRoomAsync(
+            new RoomId(this.InputRoomId.Trim().ToUpperInvariant()),
+            this.Nickname);
     });
 
     private async Task ExecuteWithProcessing(Func<Task> action)
@@ -83,14 +95,17 @@ public partial class ConnectionPanel : IDisposable
     {
         await this.WebRtcService.DisconnectAsync();
         this.HasNotifiedConnected = false;
-        this.ClearAll();
+        this.ResetAll();
     }
 
-    private void ClearAll()
+    private void ResetAll()
     {
+        this.Nickname = "";
+        this.InputNickname = "";
         this.RoomId = "";
         this.InputRoomId = "";
         this.ErrorMessage = "";
+        this.IsJoiningRoom = false;
     }
 
     private async Task CopyToClipboard(string text)
@@ -109,6 +124,8 @@ public partial class ConnectionPanel : IDisposable
     {
         if (this.WebRtcService is not null) {
             this.WebRtcService.OnStateChanged -= this.OnStateChangedAsync;
+            this.WebRtcService.OnParticipantJoined -= this.OnParticipantChangedAsync;
+            this.WebRtcService.OnParticipantLeft -= this.OnParticipantLeftAsync;
         }
         GC.SuppressFinalize(this);
     }
