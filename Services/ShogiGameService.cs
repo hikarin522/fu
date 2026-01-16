@@ -10,9 +10,11 @@ public class ShogiGameService
 
     public void NewGame()
     {
+        var localPlayer = State.LocalPlayer; // LocalPlayerを保持
         State = new GameState();
         State.Board.Initialize();
         State.Status = GameStatus.Playing;
+        State.LocalPlayer = localPlayer; // LocalPlayerを復元
         OnStateChanged?.Invoke();
     }
 

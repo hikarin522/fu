@@ -528,6 +528,43 @@ a, .btn-link {
     margin-top: 8px;
 }
 
+.btn.secondary {
+    background: #9e9e9e;
+    color: white;
+}
+
+.btn.large {
+    padding: 20px 30px;
+    font-size: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn.large .hint {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+/* 先手/後手選択 */
+.player-selection {
+    text-align: center;
+    padding: 20px;
+}
+
+.player-selection h4 {
+    margin: 0 0 20px 0;
+    color: #333;
+}
+
+.player-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
 /* ゲームコントロール */
 .game-controls {
     display: flex;

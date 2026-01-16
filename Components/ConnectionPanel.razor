@@ -1,4 +1,5 @@
 @using ShogiGame.Services
+@using ShogiGame.Models
 @inject IJSRuntime JS
 
 <div class="connection-panel">
@@ -10,54 +11,82 @@
 
     @if (ConnectionState == Services.ConnectionState.Disconnected)
     {
-        <div class="connection-options">
-            <div class="option-section">
-                <h4>対局を開始する（先手）</h4>
-                <button class="btn primary" @onclick="CreateOffer" disabled="@IsProcessing">
-                    @(IsProcessing ? "生成中..." : "接続コードを生成")
-                </button>
-
-                @if (!string.IsNullOrEmpty(Offer))
-                {
-                    <div class="code-section">
-                        <label>このコードを相手に送ってください：</label>
-                        <textarea readonly @bind="Offer" rows="4"></textarea>
-                        <button class="btn small" @onclick="() => CopyToClipboard(Offer)">コピー</button>
-                    </div>
-
-                    <div class="code-section">
-                        <label>相手からの応答コードを貼り付け：</label>
-                        <textarea @bind="Answer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
-                        <button class="btn primary" @onclick="AcceptAnswer" disabled="@(string.IsNullOrEmpty(Answer))">
-                            接続
-                        </button>
-                    </div>
-                }
-            </div>
-
-            <div class="divider">または</div>
-
-            <div class="option-section">
-                <h4>対局に参加する（後手）</h4>
-                <div class="code-section">
-                    <label>相手からの接続コードを貼り付け：</label>
-                    <textarea @bind="ReceivedOffer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
-                    <button class="btn primary" @onclick="CreateAnswer" disabled="@(string.IsNullOrEmpty(ReceivedOffer) || IsProcessing)">
-                        @(IsProcessing ? "生成中..." : "応答コードを生成")
+        @if (!SelectedPlayer.HasValue)
+        {
+            <div class="player-selection">
+                <h4>あなたの手番を選択してください</h4>
+                <div class="player-buttons">
+                    <button class="btn primary large" @onclick="() => SelectPlayer(Player.Sente)">
+                        先手（黒）
+                        <span class="hint">接続コードを生成します</span>
+                    </button>
+                    <button class="btn primary large" @onclick="() => SelectPlayer(Player.Gote)">
+                        後手（白）
+                        <span class="hint">相手のコードを入力します</span>
                     </button>
                 </div>
-
-                @if (!string.IsNullOrEmpty(GeneratedAnswer))
-                {
-                    <div class="code-section">
-                        <label>この応答コードを相手に送ってください：</label>
-                        <textarea readonly @bind="GeneratedAnswer" rows="4"></textarea>
-                        <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
-                        <p class="hint">相手がこのコードを入力すると接続されます</p>
-                    </div>
-                }
             </div>
-        </div>
+        }
+        else if (SelectedPlayer == Player.Sente)
+        {
+            <div class="connection-options">
+                <div class="option-section">
+                    <h4>対局を開始する（先手）</h4>
+                    <button class="btn secondary small" @onclick="ResetSelection">← 戻る</button>
+
+                    @if (string.IsNullOrEmpty(Offer))
+                    {
+                        <button class="btn primary" @onclick="CreateOffer" disabled="@IsProcessing">
+                            @(IsProcessing ? "生成中..." : "接続コードを生成")
+                        </button>
+                    }
+
+                    @if (!string.IsNullOrEmpty(Offer))
+                    {
+                        <div class="code-section">
+                            <label>このコードを相手に送ってください：</label>
+                            <textarea readonly @bind="Offer" rows="4"></textarea>
+                            <button class="btn small" @onclick="() => CopyToClipboard(Offer)">コピー</button>
+                        </div>
+
+                        <div class="code-section">
+                            <label>相手からの応答コードを貼り付け：</label>
+                            <textarea @bind="Answer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
+                            <button class="btn primary" @onclick="AcceptAnswer" disabled="@(string.IsNullOrEmpty(Answer))">
+                                接続
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (SelectedPlayer == Player.Gote)
+        {
+            <div class="connection-options">
+                <div class="option-section">
+                    <h4>対局に参加する（後手）</h4>
+                    <button class="btn secondary small" @onclick="ResetSelection">← 戻る</button>
+
+                    <div class="code-section">
+                        <label>相手からの接続コードを貼り付け：</label>
+                        <textarea @bind="ReceivedOffer" rows="4" placeholder="相手から受け取ったコードをここに貼り付け"></textarea>
+                        <button class="btn primary" @onclick="CreateAnswer" disabled="@(string.IsNullOrEmpty(ReceivedOffer) || IsProcessing)">
+                            @(IsProcessing ? "生成中..." : "応答コードを生成")
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(GeneratedAnswer))
+                    {
+                        <div class="code-section">
+                            <label>この応答コードを相手に送ってください：</label>
+                            <textarea readonly @bind="GeneratedAnswer" rows="4"></textarea>
+                            <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
+                            <p class="hint">相手がこのコードを入力すると接続されます</p>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     }
 
     @if (ConnectionState == Services.ConnectionState.Connecting)
@@ -119,12 +148,24 @@
 
     private ConnectionState ConnectionState => WebRtcService?.State ?? Services.ConnectionState.Disconnected;
 
+    private Player? SelectedPlayer { get; set; }
     private string Offer { get; set; } = "";
     private string Answer { get; set; } = "";
     private string ReceivedOffer { get; set; } = "";
     private string GeneratedAnswer { get; set; } = "";
     private string ErrorMessage { get; set; } = "";
     private bool IsProcessing { get; set; }
+
+    private void SelectPlayer(Player player)
+    {
+        SelectedPlayer = player;
+    }
+
+    private void ResetSelection()
+    {
+        SelectedPlayer = null;
+        ClearAll();
+    }
 
     protected override void OnInitialized()
     {
@@ -154,7 +195,7 @@
             ErrorMessage = "";
             StateHasChanged();
             Offer = await WebRtcService.CreateOfferAsync();
-            await OnPlayerAssigned.InvokeAsync(true); // true = Sente
+            await OnPlayerAssigned.InvokeAsync(SelectedPlayer == Player.Sente);
         }
         catch (Exception ex)
         {
@@ -176,7 +217,7 @@
             ErrorMessage = "";
             StateHasChanged();
             GeneratedAnswer = await WebRtcService.CreateAnswerAsync(ReceivedOffer);
-            await OnPlayerAssigned.InvokeAsync(false); // false = Gote
+            await OnPlayerAssigned.InvokeAsync(SelectedPlayer == Player.Sente);
         }
         catch (Exception ex)
         {
