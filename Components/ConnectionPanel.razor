@@ -62,10 +62,22 @@
 
     @if (ConnectionState == Services.ConnectionState.Connecting)
     {
-        <div class="connecting">
-            <div class="spinner"></div>
-            <p>接続中...</p>
-        </div>
+        @if (!string.IsNullOrEmpty(GeneratedAnswer))
+        {
+            <div class="code-section waiting-connection">
+                <p>相手の接続を待っています...</p>
+                <label>この応答コードを相手に送ってください：</label>
+                <textarea readonly @bind="GeneratedAnswer" rows="4"></textarea>
+                <button class="btn small" @onclick="() => CopyToClipboard(GeneratedAnswer)">コピー</button>
+            </div>
+        }
+        else
+        {
+            <div class="connecting">
+                <div class="spinner"></div>
+                <p>接続中...</p>
+            </div>
+        }
     }
 
     @if (ConnectionState == Services.ConnectionState.Connected)

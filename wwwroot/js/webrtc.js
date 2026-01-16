@@ -56,6 +56,7 @@ window.WebRtc = {
 
             // Answer side receives data channel
             peerConnection.ondatachannel = (event) => {
+                console.log('DataChannel received on answer side');
                 dataChannel = event.channel;
                 setupDataChannelHandlers();
             };

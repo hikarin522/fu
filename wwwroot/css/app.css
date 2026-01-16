@@ -434,6 +434,24 @@ a, .btn-link {
     margin-top: 4px;
 }
 
+.waiting-connection {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.waiting-connection p {
+    color: #ff9800;
+    font-weight: bold;
+    margin-bottom: 16px;
+}
+
+.waiting-connection label {
+    display: block;
+    text-align: left;
+}
+
 .connecting {
     text-align: center;
     padding: 40px;
