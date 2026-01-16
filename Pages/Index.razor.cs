@@ -82,7 +82,7 @@ public partial class Index : IAsyncDisposable
     private async Task DownloadKifAsync()
     {
         var kif = KifExporter.Export(this.GameService.State.MoveHistory, this.GameService.State.Status);
-        var fileName = $"shogi_{DateTime.Now:yyyyMMdd_HHmmss}.kif";
+        var fileName = $"shogi_{DateTime.Now:yyyyMMdd_HHmmss}.kifu";
         await this.JS.InvokeVoidAsync("downloadTextFile", fileName, kif);
     }
 
