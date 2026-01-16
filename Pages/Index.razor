@@ -105,18 +105,26 @@
 
     private void OnPlayerAssigned(bool isSente)
     {
-        GameService.SetLocalPlayer(isSente ? Player.Sente : Player.Gote);
+        var player = isSente ? Player.Sente : Player.Gote;
+        Console.WriteLine($"OnPlayerAssigned: isSente={isSente}, setting LocalPlayer to {player}");
+        GameService.SetLocalPlayer(player);
     }
 
     private async Task OnConnected(bool connected)
     {
+        Console.WriteLine($"OnConnected: connected={connected}, LocalPlayer={GameService.State.LocalPlayer}");
         if (connected)
         {
             // 先手がゲーム開始を送信
             if (GameService.State.LocalPlayer == Player.Sente)
             {
+                Console.WriteLine("Sente: Starting new game and sending gameStart");
                 GameService.NewGame();
                 await WebRtcService.SendGameStartAsync();
+            }
+            else
+            {
+                Console.WriteLine("Gote: Waiting for gameStart from Sente");
             }
         }
         await InvokeAsync(StateHasChanged);
@@ -124,7 +132,9 @@
 
     private void OnRemoteGameStart()
     {
+        Console.WriteLine($"OnRemoteGameStart received, LocalPlayer={GameService.State.LocalPlayer}");
         GameService.NewGame();
+        Console.WriteLine($"After NewGame: Status={GameService.State.Status}, LocalPlayer={GameService.State.LocalPlayer}");
         InvokeAsync(StateHasChanged);
     }
 

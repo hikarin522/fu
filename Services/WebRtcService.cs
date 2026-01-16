@@ -66,6 +66,7 @@ public class WebRtcService : IAsyncDisposable
     public async Task SendGameStartAsync()
     {
         var json = JsonSerializer.Serialize(new { Type = "gameStart" });
+        Console.WriteLine($"SendGameStartAsync: sending {json}");
         await _jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 
@@ -103,6 +104,7 @@ public class WebRtcService : IAsyncDisposable
             using var doc = JsonDocument.Parse(message);
             var type = doc.RootElement.GetProperty("Type").GetString();
 
+            Console.WriteLine($"OnMessageReceived: type={type}");
             switch (type)
             {
                 case "move":
@@ -114,6 +116,7 @@ public class WebRtcService : IAsyncDisposable
                     break;
 
                 case "gameStart":
+                    Console.WriteLine("Received gameStart, invoking OnGameStart");
                     OnGameStart?.Invoke();
                     break;
             }
