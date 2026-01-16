@@ -163,6 +163,19 @@ public class ShogiGameService
         {
             State.GetCapturedPieces(State.CurrentPlayer).Add(captured.Type);
             move.CapturedPiece = captured.Type;
+
+            // 王が取られた場合はゲーム終了
+            if (captured.Type == PieceType.King)
+            {
+                State.Board[to] = piece;
+                State.Board[from] = null;
+                State.MoveHistory.Add(move);
+                State.Status = State.CurrentPlayer == Player.Sente
+                    ? GameStatus.CheckmateSente
+                    : GameStatus.CheckmateGote;
+                OnStateChanged?.Invoke();
+                return true;
+            }
         }
 
         // 駒を移動
