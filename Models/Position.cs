@@ -1,56 +1,45 @@
-using System.Text.Json.Serialization;
+using System.Collections.Frozen;
+
+using ShogiGame.Models.Dto;
 
 namespace ShogiGame.Models;
 
-public readonly struct Position : IEquatable<Position>
+/// <summary>
+/// 盤面座標を表すドメインモデル
+/// </summary>
+public readonly record struct Position(int Col, int Row)
 {
-    // 将棋の座標系: 右上が1一(0,0)、左下が9九(8,8)
-    // Colは筋(1-9)、Rowは段(一-九)
-    [JsonInclude]
-    public int Col { get; init; }  // 0-8 (内部表現)
+    private const int BoardSize = 9;
 
-    [JsonInclude]
-    public int Row { get; init; }  // 0-8 (内部表現)
+    // 段の漢数字マッピング
+    private static readonly FrozenDictionary<int, string> RowKanjiMap =
+        new Dictionary<int, string> {
+            [0] = "一",
+            [1] = "二",
+            [2] = "三",
+            [3] = "四",
+            [4] = "五",
+            [5] = "六",
+            [6] = "七",
+            [7] = "八",
+            [8] = "九"
+        }.ToFrozenDictionary();
 
-    [JsonConstructor]
-    public Position(int col, int row)
-    {
-        Col = col;
-        Row = row;
-    }
+    /// <summary>盤面内の有効な座標かどうか</summary>
+    public bool IsValid => this.Col is >= 0 and < BoardSize && this.Row is >= 0 and < BoardSize;
 
-    [JsonIgnore]
-    public bool IsValid => Col >= 0 && Col < 9 && Row >= 0 && Row < 9;
+    /// <summary>先手から見た段 (0が一段目/相手陣)</summary>
+    public int SenteRow => this.Row;
 
-    // 先手から見た段 (0が一段目/相手陣)
-    [JsonIgnore]
-    public int SenteRow => Row;
-    // 後手から見た段 (0が一段目/相手陣)
-    [JsonIgnore]
-    public int GoteRow => 8 - Row;
+    /// <summary>後手から見た段 (0が一段目/相手陣)</summary>
+    public int GoteRow => BoardSize - 1 - this.Row;
 
-    // 表示用 (9一 形式)
-    public string ToNotation() => $"{9 - Col}{RowToKanji(Row)}";
+    /// <summary>棋譜表記 (例: 7六)</summary>
+    public string ToNotation() => $"{BoardSize - this.Col}{RowKanjiMap.GetValueOrDefault(this.Row, "")}";
 
-    private static string RowToKanji(int row) => row switch
-    {
-        0 => "一",
-        1 => "二",
-        2 => "三",
-        3 => "四",
-        4 => "五",
-        5 => "六",
-        6 => "七",
-        7 => "八",
-        8 => "九",
-        _ => ""
-    };
+    // DTO変換
+    public PositionDto ToDto() => new(this.Col, this.Row);
+    public static Position FromDto(PositionDto dto) => new(dto.Col, dto.Row);
 
-    public bool Equals(Position other) => Col == other.Col && Row == other.Row;
-    public override bool Equals(object? obj) => obj is Position other && Equals(other);
-    public override int GetHashCode() => HashCode.Combine(Col, Row);
-    public static bool operator ==(Position left, Position right) => left.Equals(right);
-    public static bool operator !=(Position left, Position right) => !left.Equals(right);
-
-    public override string ToString() => ToNotation();
+    public override string ToString() => this.ToNotation();
 }

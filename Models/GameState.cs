@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace ShogiGame.Models;
 
 public enum GameStatus
@@ -9,79 +11,71 @@ public enum GameStatus
     Resign
 }
 
-public class CapturedPieces
+/// <summary>
+/// 持ち駒を管理する不変レコード
+/// </summary>
+public record CapturedPieces(ImmutableDictionary<PieceType, int> Pieces)
 {
-    private readonly Dictionary<PieceType, int> _pieces = [];  // Collection expression (C# 12+)
+    public static readonly CapturedPieces Empty = new(ImmutableDictionary<PieceType, int>.Empty);
 
-    public int GetCount(PieceType type) => _pieces.GetValueOrDefault(type);
+    public int GetCount(PieceType type) => this.Pieces.GetValueOrDefault(type);
 
-    public void Add(PieceType type)
+    /// <summary>駒を追加（成駒は元の駒として追加）して新しいインスタンスを返す</summary>
+    public CapturedPieces Add(PieceType type)
     {
-        // 成駒は元の駒として持ち駒になる
-        var baseType = type switch
-        {
-            PieceType.PromotedRook => PieceType.Rook,
-            PieceType.PromotedBishop => PieceType.Bishop,
-            PieceType.PromotedSilver => PieceType.Silver,
-            PieceType.PromotedKnight => PieceType.Knight,
-            PieceType.PromotedLance => PieceType.Lance,
-            PieceType.PromotedPawn => PieceType.Pawn,
-            _ => type
-        };
-
-        // CollectionsMarshal or indexer with default
-        _pieces[baseType] = _pieces.GetValueOrDefault(baseType) + 1;
+        var baseType = type.GetUnpromotedType();
+        var newCount = this.Pieces.GetValueOrDefault(baseType) + 1;
+        return this with { Pieces = this.Pieces.SetItem(baseType, newCount) };
     }
 
-    public bool Remove(PieceType type)
+    /// <summary>駒を削除して新しいインスタンスを返す（失敗時はnull）</summary>
+    public CapturedPieces? Remove(PieceType type)
     {
-        if (_pieces.TryGetValue(type, out var count) && count > 0)
-        {
-            _pieces[type]--;
-            return true;
+        if (this.Pieces.TryGetValue(type, out var count) && count > 0) {
+            return this with { Pieces = this.Pieces.SetItem(type, count - 1) };
         }
-        return false;
+        return null;
     }
 
-    // LINQ with tuples
     public IEnumerable<(PieceType type, int count)> GetAll() =>
-        _pieces.Where(x => x.Value > 0).Select(x => (x.Key, x.Value));
-
-    public CapturedPieces Clone()
-    {
-        var clone = new CapturedPieces();
-        foreach (var (key, value) in _pieces)
-            clone._pieces[key] = value;
-        return clone;
-    }
+        this.Pieces.Where(x => x.Value > 0).Select(x => (x.Key, x.Value));
 }
 
-public class GameState
+/// <summary>
+/// 対局の状態を表す不変レコード
+/// </summary>
+public record GameState(
+    Board Board,
+    Player CurrentPlayer,
+    GameStatus Status,
+    CapturedPieces SenteCaptured,
+    CapturedPieces GoteCaptured,
+    ImmutableList<Move> MoveHistory,
+    Player LocalPlayer)
 {
-    public Board Board { get; set; } = new();
-    public Player CurrentPlayer { get; set; } = Player.Sente;
-    public GameStatus Status { get; set; } = GameStatus.WaitingForConnection;
-    public CapturedPieces SenteCaptured { get; set; } = new();
-    public CapturedPieces GoteCaptured { get; set; } = new();
-    public List<Move> MoveHistory { get; set; } = [];  // Collection expression
-    public Player LocalPlayer { get; set; } = Player.None;
+    public static GameState Initial => new(
+        new Board(),
+        Player.Sente,
+        GameStatus.WaitingForConnection,
+        CapturedPieces.Empty,
+        CapturedPieces.Empty,
+        [],
+        Player.None
+    );
 
     public CapturedPieces GetCapturedPieces(Player player) =>
-        player == Player.Sente ? SenteCaptured : GoteCaptured;
+        player == Player.Sente ? this.SenteCaptured : this.GoteCaptured;
 
-    public bool IsMyTurn => LocalPlayer == CurrentPlayer;
+    /// <summary>自分の手番かどうか</summary>
+    public bool IsMyTurn => this.LocalPlayer == this.CurrentPlayer;
 
-    public void SwitchPlayer() =>
-        CurrentPlayer = CurrentPlayer == Player.Sente ? Player.Gote : Player.Sente;
+    /// <summary>手番を交代した新しい状態を返す</summary>
+    public GameState SwitchPlayer() =>
+        this with { CurrentPlayer = this.CurrentPlayer.GetOpponent() };
 
-    public GameState Clone() => new()
-    {
-        Board = Board.Clone(),
-        CurrentPlayer = CurrentPlayer,
-        Status = Status,
-        SenteCaptured = SenteCaptured.Clone(),
-        GoteCaptured = GoteCaptured.Clone(),
-        MoveHistory = [.. MoveHistory],  // Spread element (C# 12+)
-        LocalPlayer = LocalPlayer
-    };
+    /// <summary>持ち駒を更新した新しい状態を返す</summary>
+    public GameState WithCapturedPieces(Player player, CapturedPieces captured) =>
+        player == Player.Sente
+            ? this with { SenteCaptured = captured }
+            : this with { GoteCaptured = captured };
 }

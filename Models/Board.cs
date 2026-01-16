@@ -1,103 +1,110 @@
+using System.Collections.Immutable;
+
 namespace ShogiGame.Models;
 
-public class Board
+/// <summary>
+/// 9x9の将棋盤を表す不変レコード
+/// </summary>
+public record Board
 {
-    private readonly Piece?[,] _squares = new Piece?[9, 9];
+    public const int Size = 9;
+    private readonly ImmutableArray<Piece?> _squares;
 
-    public Piece? this[int col, int row]
+    public Piece? this[int col, int row] => this._squares[col * Size + row];
+    public Piece? this[Position pos] => this._squares[pos.Col * Size + pos.Row];
+
+    private Board(ImmutableArray<Piece?> squares) => this._squares = squares;
+
+    /// <summary>初期配置の盤面を作成</summary>
+    public Board() : this(CreateInitialSquares()) { }
+
+    private static ImmutableArray<Piece?> CreateInitialSquares()
     {
-        get => _squares[col, row];
-        set => _squares[col, row] = value;
+        var builder = ImmutableArray.CreateBuilder<Piece?>(Size * Size);
+        builder.Count = Size * Size;
+
+        // 後手の駒配置 (上側: row 0-2)
+        builder[4 * Size + 0] = new(PieceType.King, Player.Gote);
+        builder[3 * Size + 0] = new(PieceType.Gold, Player.Gote);
+        builder[5 * Size + 0] = new(PieceType.Gold, Player.Gote);
+        builder[2 * Size + 0] = new(PieceType.Silver, Player.Gote);
+        builder[6 * Size + 0] = new(PieceType.Silver, Player.Gote);
+        builder[1 * Size + 0] = new(PieceType.Knight, Player.Gote);
+        builder[7 * Size + 0] = new(PieceType.Knight, Player.Gote);
+        builder[0 * Size + 0] = new(PieceType.Lance, Player.Gote);
+        builder[8 * Size + 0] = new(PieceType.Lance, Player.Gote);
+        builder[1 * Size + 1] = new(PieceType.Bishop, Player.Gote);
+        builder[7 * Size + 1] = new(PieceType.Rook, Player.Gote);
+        for (var col = 0; col < Size; col++) {
+            builder[col * Size + 2] = new(PieceType.Pawn, Player.Gote);
+        }
+
+        // 先手の駒配置 (下側: row 6-8)
+        builder[4 * Size + 8] = new(PieceType.King, Player.Sente);
+        builder[3 * Size + 8] = new(PieceType.Gold, Player.Sente);
+        builder[5 * Size + 8] = new(PieceType.Gold, Player.Sente);
+        builder[2 * Size + 8] = new(PieceType.Silver, Player.Sente);
+        builder[6 * Size + 8] = new(PieceType.Silver, Player.Sente);
+        builder[1 * Size + 8] = new(PieceType.Knight, Player.Sente);
+        builder[7 * Size + 8] = new(PieceType.Knight, Player.Sente);
+        builder[0 * Size + 8] = new(PieceType.Lance, Player.Sente);
+        builder[8 * Size + 8] = new(PieceType.Lance, Player.Sente);
+        builder[7 * Size + 7] = new(PieceType.Bishop, Player.Sente);
+        builder[1 * Size + 7] = new(PieceType.Rook, Player.Sente);
+        for (var col = 0; col < Size; col++) {
+            builder[col * Size + 6] = new(PieceType.Pawn, Player.Sente);
+        }
+
+        return builder.MoveToImmutable();
     }
 
-    public Piece? this[Position pos]
+    /// <summary>指定位置に駒を置いた新しい盤面を返す</summary>
+    public Board SetPiece(Position pos, Piece? piece) =>
+        new(this._squares.SetItem(pos.Col * Size + pos.Row, piece));
+
+    /// <summary>指定位置に駒を置いた新しい盤面を返す</summary>
+    public Board SetPiece(int col, int row, Piece? piece) =>
+        new(this._squares.SetItem(col * Size + row, piece));
+
+    /// <summary>駒を移動した新しい盤面を返す</summary>
+    public Board MovePiece(Position from, Position to, Piece? newPiece = null)
     {
-        get => _squares[pos.Col, pos.Row];
-        set => _squares[pos.Col, pos.Row] = value;
+        var piece = newPiece ?? this[from];
+        return this.SetPiece(from, null).SetPiece(to, piece);
     }
 
-    public Board() => Initialize();
-
-    public void Initialize()
-    {
-        // 盤面をクリア
-        for (var col = 0; col < 9; col++)
-            for (var row = 0; row < 9; row++)
-                _squares[col, row] = null;
-
-        // 後手の駒配置 (上側)
-        _squares[4, 0] = new(PieceType.King, Player.Gote);
-        _squares[3, 0] = new(PieceType.Gold, Player.Gote);
-        _squares[5, 0] = new(PieceType.Gold, Player.Gote);
-        _squares[2, 0] = new(PieceType.Silver, Player.Gote);
-        _squares[6, 0] = new(PieceType.Silver, Player.Gote);
-        _squares[1, 0] = new(PieceType.Knight, Player.Gote);
-        _squares[7, 0] = new(PieceType.Knight, Player.Gote);
-        _squares[0, 0] = new(PieceType.Lance, Player.Gote);
-        _squares[8, 0] = new(PieceType.Lance, Player.Gote);
-        _squares[1, 1] = new(PieceType.Bishop, Player.Gote);
-        _squares[7, 1] = new(PieceType.Rook, Player.Gote);
-        for (var col = 0; col < 9; col++)
-            _squares[col, 2] = new(PieceType.Pawn, Player.Gote);
-
-        // 先手の駒配置 (下側)
-        _squares[4, 8] = new(PieceType.King, Player.Sente);
-        _squares[3, 8] = new(PieceType.Gold, Player.Sente);
-        _squares[5, 8] = new(PieceType.Gold, Player.Sente);
-        _squares[2, 8] = new(PieceType.Silver, Player.Sente);
-        _squares[6, 8] = new(PieceType.Silver, Player.Sente);
-        _squares[1, 8] = new(PieceType.Knight, Player.Sente);
-        _squares[7, 8] = new(PieceType.Knight, Player.Sente);
-        _squares[0, 8] = new(PieceType.Lance, Player.Sente);
-        _squares[8, 8] = new(PieceType.Lance, Player.Sente);
-        _squares[7, 7] = new(PieceType.Bishop, Player.Sente);
-        _squares[1, 7] = new(PieceType.Rook, Player.Sente);
-        for (var col = 0; col < 9; col++)
-            _squares[col, 6] = new(PieceType.Pawn, Player.Sente);
-    }
-
-    public Board Clone()
-    {
-        var clone = new Board();
-        for (var col = 0; col < 9; col++)
-            for (var row = 0; row < 9; row++)
-                clone._squares[col, row] = _squares[col, row]?.Clone();
-        return clone;
-    }
-
+    /// <summary>指定プレイヤーの王の位置を検索</summary>
     public Position? FindKing(Player player)
     {
-        for (var col = 0; col < 9; col++)
-        {
-            for (var row = 0; row < 9; row++)
-            {
-                // Pattern matching with property pattern
-                if (_squares[col, row] is { Type: PieceType.King, Owner: var owner } && owner == player)
+        for (var col = 0; col < Size; col++) {
+            for (var row = 0; row < Size; row++) {
+                if (this._squares[col * Size + row] is { Type: PieceType.King, Owner: var owner } && owner == player) {
                     return new Position(col, row);
+                }
             }
         }
         return null;
     }
 
+    /// <summary>指定プレイヤーの全駒を列挙（nullなら全プレイヤー）</summary>
     public IEnumerable<(Position pos, Piece piece)> GetAllPieces(Player? player = null)
     {
-        for (var col = 0; col < 9; col++)
-        {
-            for (var row = 0; row < 9; row++)
-            {
-                if (_squares[col, row] is { } piece && (player is null || piece.Owner == player))
+        for (var col = 0; col < Size; col++) {
+            for (var row = 0; row < Size; row++) {
+                if (this._squares[col * Size + row] is { } piece && (player is null || piece.Owner == player)) {
                     yield return (new Position(col, row), piece);
+                }
             }
         }
     }
 
+    /// <summary>指定列に歩があるか（二歩チェック用）</summary>
     public bool HasPawnInColumn(int col, Player player)
     {
-        for (var row = 0; row < 9; row++)
-        {
-            // Pattern matching with property pattern
-            if (_squares[col, row] is { Type: PieceType.Pawn, Owner: var owner } && owner == player)
+        for (var row = 0; row < Size; row++) {
+            if (this._squares[col * Size + row] is { Type: PieceType.Pawn, Owner: var owner } && owner == player) {
                 return true;
+            }
         }
         return false;
     }

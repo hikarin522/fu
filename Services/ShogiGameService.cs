@@ -1,65 +1,77 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+
 using ShogiGame.Models;
 
 namespace ShogiGame.Services;
 
 public class ShogiGameService
 {
-    public GameState State { get; private set; } = new();
+    private const int SentePromotionBoundary = 2;  // 先手の成れる段（0-2）
+    private const int GotePromotionBoundary = 6;   // 後手の成れる段（6-8）
+
+    public GameState State { get; private set; } = GameState.Initial;
 
     public event Action? OnStateChanged;
 
     public void NewGame()
     {
-        var localPlayer = State.LocalPlayer;
-        State = new GameState();
-        State.Board.Initialize();
-        State.Status = GameStatus.Playing;
-        State.LocalPlayer = localPlayer;
+        var localPlayer = this.State.LocalPlayer;
+        this.State = GameState.Initial with {
+            Status = GameStatus.Playing,
+            LocalPlayer = localPlayer
+        };
         OnStateChanged?.Invoke();
     }
 
     public void SetLocalPlayer(Player player)
     {
-        State.LocalPlayer = player;
+        this.State = this.State with { LocalPlayer = player };
         OnStateChanged?.Invoke();
     }
 
     public List<Position> GetLegalMoves(Position from)
     {
-        var piece = State.Board[from];
-        if (piece is null || piece.Owner != State.CurrentPlayer)
-            return [];  // Collection expression
+        var piece = this.State.Board[from];
+        if (piece is null || piece.Owner != this.State.CurrentPlayer) {
+            return [];
+        }
 
-        var moves = GetPossibleMoves(from, piece);
-        return [.. moves.Where(to => !WouldBeInCheck(from, to, State.CurrentPlayer))];  // Spread element
+        var moves = GetPossibleMovesOnBoard(this.State.Board, from, piece);
+        return [.. moves.Where(to => !WouldBeInCheck(this.State.Board, from, to, this.State.CurrentPlayer))];
     }
 
     public List<Position> GetLegalDropPositions(PieceType pieceType)
     {
         List<Position> positions = [];
 
-        for (var col = 0; col < 9; col++)
-        {
-            for (var row = 0; row < 9; row++)
-            {
+        for (var col = 0; col < Board.Size; col++) {
+            for (var row = 0; row < Board.Size; row++) {
                 var pos = new Position(col, row);
-                if (State.Board[pos] is not null) continue;
+                if (this.State.Board[pos] is not null) {
+                    continue;
+                }
 
                 // 二歩チェック
-                if (pieceType == PieceType.Pawn && State.Board.HasPawnInColumn(col, State.CurrentPlayer))
+                if (pieceType == PieceType.Pawn && this.State.Board.HasPawnInColumn(col, this.State.CurrentPlayer)) {
                     continue;
+                }
 
                 // 行きどころのない駒チェック
-                if (!CanExistAtRow(pieceType, row, State.CurrentPlayer))
+                if (!CanExistAtRow(pieceType, row, this.State.CurrentPlayer)) {
                     continue;
+                }
 
                 // 打ち歩詰めチェック
-                if (pieceType == PieceType.Pawn && WouldBePawnDropMate(pos))
+                if (pieceType == PieceType.Pawn && this.WouldBePawnDropMate(pos)) {
                     continue;
+                }
 
                 // 王手回避チェック：打った後も王手状態なら打てない
-                if (WouldBeInCheckAfterDrop(pos, pieceType, State.CurrentPlayer))
+                var testBoard = this.State.Board.SetPiece(pos, new Piece(pieceType, this.State.CurrentPlayer));
+                if (IsInCheck(testBoard, this.State.CurrentPlayer)) {
                     continue;
+                }
 
                 positions.Add(pos);
             }
@@ -68,19 +80,11 @@ public class ShogiGameService
         return positions;
     }
 
-    private bool WouldBeInCheckAfterDrop(Position dropPos, PieceType pieceType, Player player)
+    private static bool CanExistAtRow(PieceType type, int row, Player player)
     {
-        var testBoard = State.Board.Clone();
-        testBoard[dropPos] = new Piece(pieceType, player);
-        return IsInCheck(testBoard, player);
-    }
+        var effectiveRow = player == Player.Sente ? row : Board.Size - 1 - row;
 
-    private bool CanExistAtRow(PieceType type, int row, Player player)
-    {
-        int effectiveRow = player == Player.Sente ? row : 8 - row;
-
-        return type switch
-        {
+        return type switch {
             PieceType.Pawn or PieceType.Lance => effectiveRow > 0,
             PieceType.Knight => effectiveRow > 1,
             _ => true
@@ -89,42 +93,42 @@ public class ShogiGameService
 
     private bool WouldBePawnDropMate(Position dropPos)
     {
-        var opponent = State.CurrentPlayer == Player.Sente ? Player.Gote : Player.Sente;
-        var kingPos = State.Board.FindKing(opponent);
-        if (kingPos == null) return false;
+        var opponent = this.State.CurrentPlayer.GetOpponent();
+        var kingPos = this.State.Board.FindKing(opponent);
+        if (kingPos is null) {
+            return false;
+        }
 
         // 歩が王の真上/真下にあるかチェック
-        int direction = State.CurrentPlayer == Player.Sente ? -1 : 1;
-        if (dropPos.Col != kingPos.Value.Col || dropPos.Row != kingPos.Value.Row + direction)
+        var direction = this.State.CurrentPlayer.GetForwardDirection();
+        if (dropPos.Col != kingPos.Value.Col || dropPos.Row != kingPos.Value.Row + direction) {
             return false;
+        }
 
         // この打ち歩で王手になり、かつ相手が逃げられない場合は打ち歩詰め
-        var tempBoard = State.Board.Clone();
-        tempBoard[dropPos] = new Piece(PieceType.Pawn, State.CurrentPlayer);
+        var tempBoard = this.State.Board.SetPiece(dropPos, new Piece(PieceType.Pawn, this.State.CurrentPlayer));
 
         // 王が逃げられるかチェック
-        var kingMoves = GetPossibleMoves(kingPos.Value, tempBoard[kingPos.Value]!);
-        foreach (var move in kingMoves)
-        {
-            var testBoard = tempBoard.Clone();
-            testBoard[move] = testBoard[kingPos.Value];
-            testBoard[kingPos.Value] = null;
-            if (!IsInCheck(testBoard, opponent))
+        var kingMoves = GetPossibleMovesOnBoard(tempBoard, kingPos.Value, tempBoard[kingPos.Value]!);
+        foreach (var move in kingMoves) {
+            var testBoard = tempBoard.MovePiece(kingPos.Value, move);
+            if (!IsInCheck(testBoard, opponent)) {
                 return false;
+            }
         }
 
         // 歩を取れるかチェック
-        foreach (var (pos, piece) in State.Board.GetAllPieces(opponent))
-        {
-            if (pos == kingPos) continue;
-            var moves = GetPossibleMoves(pos, piece);
-            if (moves.Contains(dropPos))
-            {
-                var testBoard = tempBoard.Clone();
-                testBoard[dropPos] = testBoard[pos];
-                testBoard[pos] = null;
-                if (!IsInCheck(testBoard, opponent))
+        foreach (var (pos, piece) in this.State.Board.GetAllPieces(opponent)) {
+            if (pos == kingPos) {
+                continue;
+            }
+
+            var moves = GetPossibleMovesOnBoard(this.State.Board, pos, piece);
+            if (moves.Contains(dropPos)) {
+                var testBoard = tempBoard.MovePiece(pos, dropPos);
+                if (!IsInCheck(testBoard, opponent)) {
                     return false;
+                }
             }
         }
 
@@ -133,66 +137,72 @@ public class ShogiGameService
 
     public bool TryMakeMove(Move move)
     {
-        Console.WriteLine($"TryMakeMove: Status={State.Status}, IsDrop={move.IsDrop}");
-        if (State.Status != GameStatus.Playing)
+        Console.WriteLine($"TryMakeMove: Status={this.State.Status}, IsDrop={move.IsDrop}");
+        if (this.State.Status != GameStatus.Playing) {
             return false;
-
-        if (move.IsDrop)
-        {
-            return TryDropPiece(move);
         }
 
-        if (move.From == null) return false;
+        if (move.IsDrop) {
+            return this.TryDropPiece(move);
+        }
+
+        if (move.From is null) {
+            return false;
+        }
 
         var from = move.From.Value;
         var to = move.To;
-        var piece = State.Board[from];
+        var piece = this.State.Board[from];
 
-        Console.WriteLine($"TryMakeMove: from=({from.Col},{from.Row}) piece={piece?.Type} owner={piece?.Owner} currentPlayer={State.CurrentPlayer}");
-        if (piece == null || piece.Owner != State.CurrentPlayer)
+        Console.WriteLine($"TryMakeMove: from=({from.Col},{from.Row}) piece={piece?.Type} owner={piece?.Owner} currentPlayer={this.State.CurrentPlayer}");
+        if (piece is null || piece.Owner != this.State.CurrentPlayer) {
             return false;
+        }
 
-        var legalMoves = GetLegalMoves(from);
+        var legalMoves = this.GetLegalMoves(from);
         Console.WriteLine($"TryMakeMove: legalMoves.Count={legalMoves.Count}, to=({to.Col},{to.Row})");
-        if (!legalMoves.Contains(to))
+        if (!legalMoves.Contains(to)) {
             return false;
+        }
 
-        // 駒を取る
-        var captured = State.Board[to];
-        if (captured != null)
-        {
-            State.GetCapturedPieces(State.CurrentPlayer).Add(captured.Type);
+        // 駒を取る場合の処理
+        var captured = this.State.Board[to];
+        var newCaptured = this.State.GetCapturedPieces(this.State.CurrentPlayer);
+        if (captured is not null) {
+            newCaptured = newCaptured.Add(captured.Type);
             move.CapturedPiece = captured.Type;
 
             // 王が取られた場合はゲーム終了
-            if (captured.Type == PieceType.King)
-            {
-                State.Board[to] = piece;
-                State.Board[from] = null;
-                State.MoveHistory.Add(move);
-                State.Status = State.CurrentPlayer == Player.Sente
-                    ? GameStatus.CheckmateSente
-                    : GameStatus.CheckmateGote;
+            if (captured.Type == PieceType.King) {
+                this.State = this.State with {
+                    Board = this.State.Board.MovePiece(from, to),
+                    MoveHistory = this.State.MoveHistory.Add(move),
+                    Status = this.State.CurrentPlayer == Player.Sente
+                        ? GameStatus.CheckmateSente
+                        : GameStatus.CheckmateGote
+                };
+                this.State = this.State.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
                 OnStateChanged?.Invoke();
                 return true;
             }
         }
 
-        // 駒を移動
-        State.Board[to] = piece;
-        State.Board[from] = null;
+        // 駒を移動（成りの場合は新しいPieceを作成）
+        var newPiece = move.IsPromotion && piece.Type.CanPromote()
+            ? piece with { Type = piece.Type.GetPromotedType() }
+            : piece;
 
-        // 成り
-        if (move.IsPromotion && piece.CanPromote)
-        {
-            State.Board[to]!.Type = piece.Promote();
-        }
+        var newState = this.State with {
+            Board = this.State.Board.MovePiece(from, to, newPiece),
+            MoveHistory = this.State.MoveHistory.Add(move)
+        };
+        newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
+        newState = newState.SwitchPlayer();
 
-        State.MoveHistory.Add(move);
-        State.SwitchPlayer();
+        this.State = newState;
 
         // 詰みチェック
-        CheckForCheckmate();
+        this.CheckForCheckmate();
 
         OnStateChanged?.Invoke();
         return true;
@@ -200,21 +210,31 @@ public class ShogiGameService
 
     private bool TryDropPiece(Move move)
     {
-        var captured = State.GetCapturedPieces(State.CurrentPlayer);
-        if (captured.GetCount(move.PieceType) <= 0)
+        var captured = this.State.GetCapturedPieces(this.State.CurrentPlayer);
+        if (captured.GetCount(move.PieceType) <= 0) {
             return false;
+        }
 
-        var legalPositions = GetLegalDropPositions(move.PieceType);
-        if (!legalPositions.Contains(move.To))
+        var legalPositions = this.GetLegalDropPositions(move.PieceType);
+        if (!legalPositions.Contains(move.To)) {
             return false;
+        }
 
-        captured.Remove(move.PieceType);
-        State.Board[move.To] = new Piece(move.PieceType, State.CurrentPlayer);
+        var newCaptured = captured.Remove(move.PieceType);
+        if (newCaptured is null) {
+            return false;
+        }
 
-        State.MoveHistory.Add(move);
-        State.SwitchPlayer();
+        var newState = this.State with {
+            Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, this.State.CurrentPlayer)),
+            MoveHistory = this.State.MoveHistory.Add(move)
+        };
+        newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
+        newState = newState.SwitchPlayer();
 
-        CheckForCheckmate();
+        this.State = newState;
+
+        this.CheckForCheckmate();
 
         OnStateChanged?.Invoke();
         return true;
@@ -222,65 +242,61 @@ public class ShogiGameService
 
     public void ApplyRemoteMove(Move move)
     {
-        Console.WriteLine($"ApplyRemoteMove: From=({move.From?.Col},{move.From?.Row}) To=({move.To.Col},{move.To.Row}) CurrentPlayer={State.CurrentPlayer}");
-        move.Player = State.CurrentPlayer;
-        var result = TryMakeMove(move);
+        Console.WriteLine($"ApplyRemoteMove: From=({move.From?.Col},{move.From?.Row}) To=({move.To.Col},{move.To.Row}) CurrentPlayer={this.State.CurrentPlayer}");
+        move.Player = this.State.CurrentPlayer;
+        var result = this.TryMakeMove(move);
         Console.WriteLine($"ApplyRemoteMove: TryMakeMove returned {result}");
     }
 
     public bool CanPromote(Position from, Position to)
     {
-        var piece = State.Board[from];
-        if (piece == null || !piece.CanPromote || piece.IsPromoted)
+        var piece = this.State.Board[from];
+        if (piece is null || !piece.Type.CanPromote() || piece.Type.IsPromoted()) {
             return false;
+        }
 
         // 敵陣（相手から見て1-3段目）に入る or 出る場合に成れる
-        if (piece.Owner == Player.Sente)
-        {
-            return from.Row <= 2 || to.Row <= 2;
-        }
-        else
-        {
-            return from.Row >= 6 || to.Row >= 6;
-        }
+        return piece.Owner == Player.Sente
+            ? from.Row <= SentePromotionBoundary || to.Row <= SentePromotionBoundary
+            : from.Row >= GotePromotionBoundary || to.Row >= GotePromotionBoundary;
     }
 
     public bool MustPromote(Position from, Position to)
     {
-        var piece = State.Board[from];
-        if (piece == null) return false;
+        var piece = this.State.Board[from];
+        if (piece is null) {
+            return false;
+        }
 
         return !CanExistAtRow(piece.Type, to.Row, piece.Owner);
     }
 
-    private List<Position> GetPossibleMoves(Position from, Piece piece)
+    // 統合された移動先取得メソッド（盤面を引数に取る）
+    private static List<Position> GetPossibleMovesOnBoard(Board board, Position from, Piece piece)
     {
         List<Position> moves = [];
         var directions = GetMoveDirections(piece.Type, piece.Owner);
 
-        foreach (var (dc, dr, slide) in directions)
-        {
+        foreach (var (dc, dr, slide) in directions) {
             var col = from.Col + dc;
             var row = from.Row + dr;
 
-            while (col is >= 0 and < 9 && row is >= 0 and < 9)  // Pattern matching in range
-            {
-                var target = State.Board[col, row];
-                if (target is null)
-                {
+            while (col is >= 0 and < Board.Size && row is >= 0 and < Board.Size) {
+                var target = board[col, row];
+                if (target is null) {
                     moves.Add(new Position(col, row));
                 }
-                else if (target.Owner != piece.Owner)
-                {
+                else if (target.Owner != piece.Owner) {
                     moves.Add(new Position(col, row));
                     break;
                 }
-                else
-                {
+                else {
                     break;
                 }
 
-                if (!slide) break;
+                if (!slide) {
+                    break;
+                }
 
                 col += dc;
                 row += dr;
@@ -290,160 +306,148 @@ public class ShogiGameService
         return moves;
     }
 
-    // Collection expressions for all move patterns
-    private static List<(int dc, int dr, bool slide)> GetMoveDirections(PieceType type, Player owner)
-    {
-        var forward = owner == Player.Sente ? -1 : 1;
+    // 移動方向の定義 - FrozenDictionary for thread-safe read-only access
+    private static readonly FrozenDictionary<(PieceType, int), (int dc, int dr, bool slide)[]> DirectionCache =
+        BuildDirectionCache().ToFrozenDictionary();
 
-        return type switch
-        {
-            PieceType.King =>
-            [
+    private static Dictionary<(PieceType, int), (int dc, int dr, bool slide)[]> BuildDirectionCache()
+    {
+        var cache = new Dictionary<(PieceType, int), (int dc, int dr, bool slide)[]>();
+
+        foreach (var forward in new[] { -1, 1 }) {
+            // King - 8方向1マス
+            cache[(PieceType.King, forward)] = [
                 (-1, -1, false), (0, -1, false), (1, -1, false),
                 (-1, 0, false), (1, 0, false),
                 (-1, 1, false), (0, 1, false), (1, 1, false)
-            ],
-            PieceType.Rook =>
-            [
+            ];
+
+            // Rook - 縦横スライド
+            cache[(PieceType.Rook, forward)] = [
                 (0, -1, true), (0, 1, true), (-1, 0, true), (1, 0, true)
-            ],
-            PieceType.PromotedRook =>
-            [
+            ];
+
+            // PromotedRook - 縦横スライド + 斜め1マス
+            cache[(PieceType.PromotedRook, forward)] = [
                 (0, -1, true), (0, 1, true), (-1, 0, true), (1, 0, true),
                 (-1, -1, false), (1, -1, false), (-1, 1, false), (1, 1, false)
-            ],
-            PieceType.Bishop =>
-            [
+            ];
+
+            // Bishop - 斜めスライド
+            cache[(PieceType.Bishop, forward)] = [
                 (-1, -1, true), (1, -1, true), (-1, 1, true), (1, 1, true)
-            ],
-            PieceType.PromotedBishop =>
-            [
+            ];
+
+            // PromotedBishop - 斜めスライド + 縦横1マス
+            cache[(PieceType.PromotedBishop, forward)] = [
                 (-1, -1, true), (1, -1, true), (-1, 1, true), (1, 1, true),
                 (0, -1, false), (0, 1, false), (-1, 0, false), (1, 0, false)
-            ],
-            PieceType.Gold or PieceType.PromotedSilver or PieceType.PromotedKnight
-                or PieceType.PromotedLance or PieceType.PromotedPawn =>
-            [
+            ];
+
+            // Gold and promoted pieces (except Rook/Bishop)
+            var goldMoves = new (int, int, bool)[] {
                 (0, forward, false), (-1, forward, false), (1, forward, false),
                 (-1, 0, false), (1, 0, false), (0, -forward, false)
-            ],
-            PieceType.Silver =>
-            [
+            };
+            cache[(PieceType.Gold, forward)] = goldMoves;
+            cache[(PieceType.PromotedSilver, forward)] = goldMoves;
+            cache[(PieceType.PromotedKnight, forward)] = goldMoves;
+            cache[(PieceType.PromotedLance, forward)] = goldMoves;
+            cache[(PieceType.PromotedPawn, forward)] = goldMoves;
+
+            // Silver - 前3方向 + 斜め後ろ2方向
+            cache[(PieceType.Silver, forward)] = [
                 (0, forward, false), (-1, forward, false), (1, forward, false),
                 (-1, -forward, false), (1, -forward, false)
-            ],
-            PieceType.Knight =>
-            [
+            ];
+
+            // Knight - 桂馬飛び
+            cache[(PieceType.Knight, forward)] = [
                 (-1, forward * 2, false), (1, forward * 2, false)
-            ],
-            PieceType.Lance =>
-            [
+            ];
+
+            // Lance - 前方スライド
+            cache[(PieceType.Lance, forward)] = [
                 (0, forward, true)
-            ],
-            PieceType.Pawn =>
-            [
+            ];
+
+            // Pawn - 前1マス
+            cache[(PieceType.Pawn, forward)] = [
                 (0, forward, false)
-            ],
-            _ => []
-        };
+            ];
+        }
+
+        return cache;
     }
 
-    private bool WouldBeInCheck(Position from, Position to, Player player)
+    private static (int dc, int dr, bool slide)[] GetMoveDirections(PieceType type, Player owner)
     {
-        var testBoard = State.Board.Clone();
-        testBoard[to] = testBoard[from];
-        testBoard[from] = null;
+        var forward = owner.GetForwardDirection();
+        return DirectionCache.GetValueOrDefault((type, forward), []);
+    }
+
+    private static bool WouldBeInCheck(Board board, Position from, Position to, Player player)
+    {
+        var testBoard = board.MovePiece(from, to);
         return IsInCheck(testBoard, player);
     }
 
-    private bool IsInCheck(Board board, Player player)
+    private static bool IsInCheck(Board board, Player player)
     {
         var kingPos = board.FindKing(player);
-        if (kingPos == null) return false;
+        if (kingPos is null) {
+            return false;
+        }
 
-        var opponent = player == Player.Sente ? Player.Gote : Player.Sente;
+        var opponent = player.GetOpponent();
 
-        foreach (var (pos, piece) in board.GetAllPieces(opponent))
-        {
+        foreach (var (pos, piece) in board.GetAllPieces(opponent)) {
             var moves = GetPossibleMovesOnBoard(board, pos, piece);
-            if (moves.Contains(kingPos.Value))
+            if (moves.Contains(kingPos.Value)) {
                 return true;
+            }
         }
 
         return false;
     }
 
-    private List<Position> GetPossibleMovesOnBoard(Board board, Position from, Piece piece)
-    {
-        List<Position> moves = [];
-        var directions = GetMoveDirections(piece.Type, piece.Owner);
-
-        foreach (var (dc, dr, slide) in directions)
-        {
-            var col = from.Col + dc;
-            var row = from.Row + dr;
-
-            while (col is >= 0 and < 9 && row is >= 0 and < 9)
-            {
-                var target = board[col, row];
-                if (target is null)
-                {
-                    moves.Add(new Position(col, row));
-                }
-                else if (target.Owner != piece.Owner)
-                {
-                    moves.Add(new Position(col, row));
-                    break;
-                }
-                else
-                {
-                    break;
-                }
-
-                if (!slide) break;
-
-                col += dc;
-                row += dr;
-            }
-        }
-
-        return moves;
-    }
-
-    public bool IsInCheck() => IsInCheck(State.Board, State.CurrentPlayer);
+    public bool IsInCheck() => IsInCheck(this.State.Board, this.State.CurrentPlayer);
 
     private void CheckForCheckmate()
     {
-        var currentPlayer = State.CurrentPlayer;
+        var currentPlayer = this.State.CurrentPlayer;
 
         // 全ての合法手を探す
-        foreach (var (pos, piece) in State.Board.GetAllPieces(currentPlayer))
-        {
-            var moves = GetLegalMoves(pos);
-            if (moves.Any()) return;
+        foreach (var (pos, _) in this.State.Board.GetAllPieces(currentPlayer)) {
+            if (this.GetLegalMoves(pos).Count > 0) {
+                return;
+            }
         }
 
         // 持ち駒を打てるかチェック
-        var captured = State.GetCapturedPieces(currentPlayer);
-        foreach (var (type, count) in captured.GetAll())
-        {
-            if (count > 0 && GetLegalDropPositions(type).Any())
+        var captured = this.State.GetCapturedPieces(currentPlayer);
+        foreach (var (type, count) in captured.GetAll()) {
+            if (count > 0 && this.GetLegalDropPositions(type).Count > 0) {
                 return;
+            }
         }
 
-        // 合法手がない = 詰み
-        State.Status = currentPlayer == Player.Sente
-            ? GameStatus.CheckmateGote  // 先手が詰まされた = 後手の勝ち
-            : GameStatus.CheckmateSente;
-
+        // 合法手がない = 詰み（詰まされた側の負け = 相手の勝ち）
+        this.State = this.State with {
+            Status = currentPlayer.GetOpponent() == Player.Sente
+                ? GameStatus.CheckmateSente
+                : GameStatus.CheckmateGote
+        };
         OnStateChanged?.Invoke();
     }
 
     public void Resign()
     {
-        State.Status = State.CurrentPlayer == Player.Sente
-            ? GameStatus.CheckmateGote
-            : GameStatus.CheckmateSente;
+        this.State = this.State with {
+            Status = this.State.CurrentPlayer.GetOpponent() == Player.Sente
+                ? GameStatus.CheckmateSente
+                : GameStatus.CheckmateGote
+        };
         OnStateChanged?.Invoke();
     }
 }
