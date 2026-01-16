@@ -36,18 +36,14 @@ public class WebRtcService : IAsyncDisposable
 
     public async Task<string> CreateOfferAsync()
     {
-        State = ConnectionState.Connecting;
-        OnStateChanged?.Invoke(State);
-
+        // Offer生成中は状態を変えない（UIを維持）
         var offer = await _jsRuntime.InvokeAsync<string>("WebRtc.createOffer");
         return offer;
     }
 
     public async Task<string> CreateAnswerAsync(string offer)
     {
-        State = ConnectionState.Connecting;
-        OnStateChanged?.Invoke(State);
-
+        // Answer生成中は状態を変えない（UIを維持）
         var answer = await _jsRuntime.InvokeAsync<string>("WebRtc.createAnswer", offer);
         return answer;
     }
