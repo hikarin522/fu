@@ -94,6 +94,7 @@
             await WebRtcService.InitializeAsync();
             WebRtcService.OnMoveReceived += OnRemoteMoveReceived;
             WebRtcService.OnGameStart += OnRemoteGameStart;
+            WebRtcService.OnDataChannelReady += OnDataChannelReady;
             GameService.OnStateChanged += OnGameStateChanged;
         }
         catch (Exception ex)
@@ -113,17 +114,27 @@
     private async Task OnConnected(bool connected)
     {
         Console.WriteLine($"OnConnected: connected={connected}, LocalPlayer={GameService.State.LocalPlayer}");
-        if (connected && GameService.State.LocalPlayer is Player.Sente)
-        {
-            Console.WriteLine("Sente: Starting new game and sending gameStart");
-            GameService.NewGame();
-            await WebRtcService.SendGameStartAsync();
-        }
-        else if (connected)
-        {
-            Console.WriteLine("Gote: Waiting for gameStart from Sente");
-        }
+        // DataChannelの準備完了を待つため、ここではゲーム開始しない
         await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnDataChannelReady()
+    {
+        Console.WriteLine($"OnDataChannelReady: LocalPlayer={GameService.State.LocalPlayer}");
+        InvokeAsync(async () =>
+        {
+            if (GameService.State.LocalPlayer is Player.Sente)
+            {
+                Console.WriteLine("Sente: DataChannel ready, starting new game and sending gameStart");
+                GameService.NewGame();
+                await WebRtcService.SendGameStartAsync();
+            }
+            else
+            {
+                Console.WriteLine("Gote: DataChannel ready, waiting for gameStart from Sente");
+            }
+            StateHasChanged();
+        });
     }
 
     private void OnRemoteGameStart()
@@ -163,6 +174,7 @@
     {
         WebRtcService.OnMoveReceived -= OnRemoteMoveReceived;
         WebRtcService.OnGameStart -= OnRemoteGameStart;
+        WebRtcService.OnDataChannelReady -= OnDataChannelReady;
         GameService.OnStateChanged -= OnGameStateChanged;
     }
 }

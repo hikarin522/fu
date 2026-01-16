@@ -25,13 +25,15 @@ public enum ConnectionState
 public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 {
     private DotNetObjectReference<WebRtcService>? _dotNetRef;
+    private bool _dataChannelOpen;
 
     public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
-    public bool IsConnected => State == ConnectionState.Connected;
+    public bool IsConnected => State == ConnectionState.Connected && _dataChannelOpen;
 
     public event Action<Move>? OnMoveReceived;
     public event Action<ConnectionState>? OnStateChanged;
     public event Action? OnGameStart;
+    public event Action? OnDataChannelReady;  // DataChannelが開いた時に発火
 
     public async Task InitializeAsync()
     {
@@ -81,16 +83,21 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     [JSInvokable]
     public void OnDataChannelOpen()
     {
+        Console.WriteLine("OnDataChannelOpen called");
+        _dataChannelOpen = true;
         if (State != ConnectionState.Connected)
         {
             State = ConnectionState.Connected;
             OnStateChanged?.Invoke(State);
         }
+        OnDataChannelReady?.Invoke();
     }
 
     [JSInvokable]
     public void OnDataChannelClose()
     {
+        Console.WriteLine("OnDataChannelClose called");
+        _dataChannelOpen = false;
         if (State != ConnectionState.Disconnected)
         {
             State = ConnectionState.Disconnected;
