@@ -881,6 +881,17 @@ a, .btn-link {
     background: #ff9800;
 }
 
+.branch-indicator {
+    font-size: 12px;
+    color: #4caf50;
+    text-align: center;
+    padding: 4px 8px;
+    margin-bottom: 8px;
+    background: #e8f5e9;
+    border-radius: 4px;
+    border: 1px solid #a5d6a7;
+}
+
 /* Blazor エラー UI */
 #blazor-error-ui {
     background: lightyellow;

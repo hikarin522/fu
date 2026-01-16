@@ -169,6 +169,8 @@ public partial class Index : IAsyncDisposable
 
     private Task GoForwardAsync() => this.GameService.GoForwardAsync();
 
+    private Task GoForwardBranchAsync(int branchIndex) => this.GameService.GoForwardBranchAsync(branchIndex);
+
     private Task GoToLatestAsync() => this.GameService.GoToLatestAsync();
 
     private Task GoToMoveAsync(int moveIndex) => this.GameService.SetViewingMoveIndexAsync(moveIndex);

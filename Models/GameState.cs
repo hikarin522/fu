@@ -82,6 +82,9 @@ public record GameState(
     Player LocalPlayer,
     int? ViewingMoveIndex = null)
 {
+    /// <summary>棋譜ツリー（分岐対応）</summary>
+    public MoveTree MoveTree { get; init; } = new();
+
     public static GameState Initial => new(
         new Board(),
         Player.Sente,
@@ -98,11 +101,17 @@ public record GameState(
     /// <summary>自分の手番かどうか</summary>
     public bool IsMyTurn => this.LocalPlayer == this.CurrentPlayer;
 
-    /// <summary>棋譜閲覧モード中かどうか（最新手以外を表示中）</summary>
+    /// <summary>棋譜閲覧モード中かどうか（ツリーの現在位置が実際の盤面と異なる）</summary>
     public bool IsReviewing => this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count;
 
     /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
     public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.MoveHistory.Count;
+
+    /// <summary>現在位置に分岐があるか</summary>
+    public bool HasBranches => this.MoveTree.HasBranchesAtCurrent;
+
+    /// <summary>次の手の選択肢（分岐）</summary>
+    public IReadOnlyList<MoveNode> NextBranches => this.MoveTree.NextMoves;
 
     /// <summary>手番を交代した新しい状態を返す</summary>
     public GameState SwitchPlayer() =>

@@ -22,7 +22,8 @@ public class ShogiGameService
         var localPlayer = this.State.LocalPlayer;
         this.State = GameState.Initial with {
             Status = GameStatus.Playing,
-            LocalPlayer = localPlayer
+            LocalPlayer = localPlayer,
+            MoveTree = new MoveTree()
         };
         await this.NotifyStateChangedAsync();
     }
@@ -135,6 +136,11 @@ public class ShogiGameService
             return false;
         }
 
+        // 閲覧モード中の場合、その局面から分岐を作成するため盤面状態を再構築
+        if (this.State.IsReviewing) {
+            await this.BranchFromCurrentPositionAsync();
+        }
+
         if (move.IsDrop) {
             return await this.TryDropPieceAsync(move);
         }
@@ -167,6 +173,7 @@ public class ShogiGameService
 
             // 王が取られた場合はゲーム終了
             if (captured.Type == PieceType.King) {
+                this.State.MoveTree.AddMove(moveToRecord);
                 this.State = this.State with {
                     Board = this.State.Board.MovePiece(from, to),
                     MoveHistory = this.State.MoveHistory.Add(moveToRecord),
@@ -183,9 +190,13 @@ public class ShogiGameService
             ? piece with { Type = piece.Type.GetPromotedType() }
             : piece;
 
+        // MoveTreeに手を追加
+        this.State.MoveTree.AddMove(moveToRecord);
+
         var newState = this.State with {
             Board = this.State.Board.MovePiece(from, to, newPiece),
-            MoveHistory = this.State.MoveHistory.Add(moveToRecord)
+            MoveHistory = this.State.MoveHistory.Add(moveToRecord),
+            ViewingMoveIndex = null  // 最新局面に戻る
         };
         newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
         newState = newState.SwitchPlayer();
@@ -197,6 +208,35 @@ public class ShogiGameService
 
         await this.NotifyStateChangedAsync();
         return true;
+    }
+
+    /// <summary>閲覧中の局面から分岐を作成</summary>
+    private Task BranchFromCurrentPositionAsync()
+    {
+        var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
+
+        // MoveTreeの位置を閲覧位置に合わせる
+        this.State.MoveTree.GoToStart();
+        for (var i = 0; i < viewingIndex; i++) {
+            this.State.MoveTree.GoForward();
+        }
+
+        // 現在の盤面状態を再構築して State を更新
+        var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
+
+        // MoveHistoryも閲覧位置までに切り詰める（新しい分岐の開始）
+        var newHistory = this.State.MoveHistory.Take(viewingIndex).ToImmutableList();
+
+        this.State = this.State with {
+            Board = board,
+            SenteCaptured = senteCaptured,
+            GoteCaptured = goteCaptured,
+            CurrentPlayer = currentPlayer,
+            MoveHistory = newHistory,
+            ViewingMoveIndex = null
+        };
+
+        return Task.CompletedTask;
     }
 
     private async Task<bool> TryDropPieceAsync(Move move)
@@ -216,9 +256,13 @@ public class ShogiGameService
             return false;
         }
 
+        // MoveTreeに手を追加
+        this.State.MoveTree.AddMove(move);
+
         var newState = this.State with {
             Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, this.State.CurrentPlayer)),
-            MoveHistory = this.State.MoveHistory.Add(move)
+            MoveHistory = this.State.MoveHistory.Add(move),
+            ViewingMoveIndex = null  // 最新局面に戻る
         };
         newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
         newState = newState.SwitchPlayer();
@@ -435,7 +479,7 @@ public class ShogiGameService
         }
     }
 
-    /// <summary>棋譜を1手進む</summary>
+    /// <summary>棋譜を1手進む（メインライン）</summary>
     public async Task GoForwardAsync()
     {
         var currentIndex = this.State.DisplayMoveIndex;
@@ -446,6 +490,46 @@ public class ShogiGameService
                 ViewingMoveIndex = newIndex == this.State.MoveHistory.Count ? null : newIndex
             };
             await this.NotifyStateChangedAsync();
+        }
+    }
+
+    /// <summary>棋譜を指定した分岐に進む</summary>
+    public async Task GoForwardBranchAsync(int branchIndex)
+    {
+        // MoveTreeを閲覧位置に同期
+        this.SyncMoveTreeToViewingPosition();
+
+        if (this.State.MoveTree.GoForwardBranch(branchIndex)) {
+            var currentNode = this.State.MoveTree.CurrentNode;
+            if (currentNode is not null) {
+                // 分岐先の履歴に更新
+                var branchMoves = currentNode.GetMoves();
+                this.State = this.State with {
+                    MoveHistory = branchMoves,
+                    ViewingMoveIndex = branchMoves.Count == this.State.MoveHistory.Count ? null : branchMoves.Count
+                };
+
+                // 盤面も更新
+                var (board, senteCaptured, goteCaptured, currentPlayer) = GetBoardAtMoveFromTree(branchMoves);
+                this.State = this.State with {
+                    Board = board,
+                    SenteCaptured = senteCaptured,
+                    GoteCaptured = goteCaptured,
+                    CurrentPlayer = currentPlayer
+                };
+
+                await this.NotifyStateChangedAsync();
+            }
+        }
+    }
+
+    /// <summary>MoveTreeを閲覧位置に同期</summary>
+    private void SyncMoveTreeToViewingPosition()
+    {
+        var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
+        this.State.MoveTree.GoToStart();
+        for (var i = 0; i < viewingIndex; i++) {
+            this.State.MoveTree.GoForward();
         }
     }
 
@@ -466,6 +550,22 @@ public class ShogiGameService
             this.State = this.State with { ViewingMoveIndex = newIndex };
             await this.NotifyStateChangedAsync();
         }
+    }
+
+    /// <summary>手のリストから盤面状態を再構築</summary>
+    private static (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) GetBoardAtMoveFromTree(ImmutableList<Move> moves)
+    {
+        var board = new Board();
+        var senteCaptured = CapturedPieces.Empty;
+        var goteCaptured = CapturedPieces.Empty;
+        var currentPlayer = Player.Sente;
+
+        foreach (var move in moves) {
+            (board, senteCaptured, goteCaptured) = ApplyMove(board, move, currentPlayer, senteCaptured, goteCaptured);
+            currentPlayer = currentPlayer.GetOpponent();
+        }
+
+        return (board, senteCaptured, goteCaptured, currentPlayer);
     }
 
     /// <summary>指定した手数の盤面状態を再構築する</summary>
