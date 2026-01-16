@@ -157,10 +157,7 @@
     private bool IsProcessing { get; set; }
     private bool HasNotifiedConnected { get; set; }
 
-    private void SelectPlayer(Player player)
-    {
-        SelectedPlayer = player;
-    }
+    private void SelectPlayer(Player player) => SelectedPlayer = player;
 
     private void ResetSelection()
     {
@@ -170,7 +167,7 @@
 
     protected override void OnInitialized()
     {
-        if (WebRtcService != null)
+        if (WebRtcService is not null)
         {
             WebRtcService.OnStateChanged += OnStateChanged;
         }
@@ -276,7 +273,7 @@
 
     public void Dispose()
     {
-        if (WebRtcService != null)
+        if (WebRtcService is not null)
         {
             WebRtcService.OnStateChanged -= OnStateChanged;
         }

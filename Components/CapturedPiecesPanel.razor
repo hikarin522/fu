@@ -33,10 +33,12 @@
     [Parameter] public EventCallback<PieceType> OnPieceSelected { get; set; }
     [Parameter] public PieceType? SelectedPiece { get; set; }
 
-    private static readonly PieceType[] PieceOrder = {
+    // Collection expression for array (C# 12+)
+    private static readonly PieceType[] PieceOrder =
+    [
         PieceType.Rook, PieceType.Bishop, PieceType.Gold, PieceType.Silver,
         PieceType.Knight, PieceType.Lance, PieceType.Pawn
-    };
+    ];
 
     private async Task OnClick(PieceType pieceType)
     {
@@ -46,7 +48,7 @@
         }
     }
 
-    private string GetPieceChar(PieceType type) => type switch
+    private static string GetPieceChar(PieceType type) => type switch
     {
         PieceType.Rook => "飛",
         PieceType.Bishop => "角",

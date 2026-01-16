@@ -10,11 +10,11 @@ public class ShogiGameService
 
     public void NewGame()
     {
-        var localPlayer = State.LocalPlayer; // LocalPlayerを保持
+        var localPlayer = State.LocalPlayer;
         State = new GameState();
         State.Board.Initialize();
         State.Status = GameStatus.Playing;
-        State.LocalPlayer = localPlayer; // LocalPlayerを復元
+        State.LocalPlayer = localPlayer;
         OnStateChanged?.Invoke();
     }
 
@@ -27,25 +27,23 @@ public class ShogiGameService
     public List<Position> GetLegalMoves(Position from)
     {
         var piece = State.Board[from];
-        if (piece == null || piece.Owner != State.CurrentPlayer)
-            return new List<Position>();
+        if (piece is null || piece.Owner != State.CurrentPlayer)
+            return [];  // Collection expression
 
         var moves = GetPossibleMoves(from, piece);
-
-        // 自玉が王手になる手を除外
-        return moves.Where(to => !WouldBeInCheck(from, to, State.CurrentPlayer)).ToList();
+        return [.. moves.Where(to => !WouldBeInCheck(from, to, State.CurrentPlayer))];  // Spread element
     }
 
     public List<Position> GetLegalDropPositions(PieceType pieceType)
     {
-        var positions = new List<Position>();
+        List<Position> positions = [];
 
-        for (int col = 0; col < 9; col++)
+        for (var col = 0; col < 9; col++)
         {
-            for (int row = 0; row < 9; row++)
+            for (var row = 0; row < 9; row++)
             {
                 var pos = new Position(col, row);
-                if (State.Board[pos] != null) continue;
+                if (State.Board[pos] is not null) continue;
 
                 // 二歩チェック
                 if (pieceType == PieceType.Pawn && State.Board.HasPawnInColumn(col, State.CurrentPlayer))
@@ -228,18 +226,18 @@ public class ShogiGameService
 
     private List<Position> GetPossibleMoves(Position from, Piece piece)
     {
-        var moves = new List<Position>();
+        List<Position> moves = [];
         var directions = GetMoveDirections(piece.Type, piece.Owner);
 
         foreach (var (dc, dr, slide) in directions)
         {
-            int col = from.Col + dc;
-            int row = from.Row + dr;
+            var col = from.Col + dc;
+            var row = from.Row + dr;
 
-            while (col >= 0 && col < 9 && row >= 0 && row < 9)
+            while (col is >= 0 and < 9 && row is >= 0 and < 9)  // Pattern matching in range
             {
                 var target = State.Board[col, row];
-                if (target == null)
+                if (target is null)
                 {
                     moves.Add(new Position(col, row));
                 }
@@ -263,60 +261,61 @@ public class ShogiGameService
         return moves;
     }
 
+    // Collection expressions for all move patterns
     private static List<(int dc, int dr, bool slide)> GetMoveDirections(PieceType type, Player owner)
     {
-        int forward = owner == Player.Sente ? -1 : 1;
+        var forward = owner == Player.Sente ? -1 : 1;
 
         return type switch
         {
-            PieceType.King => new List<(int, int, bool)>
-            {
+            PieceType.King =>
+            [
                 (-1, -1, false), (0, -1, false), (1, -1, false),
                 (-1, 0, false), (1, 0, false),
                 (-1, 1, false), (0, 1, false), (1, 1, false)
-            },
-            PieceType.Rook => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.Rook =>
+            [
                 (0, -1, true), (0, 1, true), (-1, 0, true), (1, 0, true)
-            },
-            PieceType.PromotedRook => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.PromotedRook =>
+            [
                 (0, -1, true), (0, 1, true), (-1, 0, true), (1, 0, true),
                 (-1, -1, false), (1, -1, false), (-1, 1, false), (1, 1, false)
-            },
-            PieceType.Bishop => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.Bishop =>
+            [
                 (-1, -1, true), (1, -1, true), (-1, 1, true), (1, 1, true)
-            },
-            PieceType.PromotedBishop => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.PromotedBishop =>
+            [
                 (-1, -1, true), (1, -1, true), (-1, 1, true), (1, 1, true),
                 (0, -1, false), (0, 1, false), (-1, 0, false), (1, 0, false)
-            },
+            ],
             PieceType.Gold or PieceType.PromotedSilver or PieceType.PromotedKnight
-                or PieceType.PromotedLance or PieceType.PromotedPawn => new List<(int, int, bool)>
-            {
+                or PieceType.PromotedLance or PieceType.PromotedPawn =>
+            [
                 (0, forward, false), (-1, forward, false), (1, forward, false),
                 (-1, 0, false), (1, 0, false), (0, -forward, false)
-            },
-            PieceType.Silver => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.Silver =>
+            [
                 (0, forward, false), (-1, forward, false), (1, forward, false),
                 (-1, -forward, false), (1, -forward, false)
-            },
-            PieceType.Knight => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.Knight =>
+            [
                 (-1, forward * 2, false), (1, forward * 2, false)
-            },
-            PieceType.Lance => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.Lance =>
+            [
                 (0, forward, true)
-            },
-            PieceType.Pawn => new List<(int, int, bool)>
-            {
+            ],
+            PieceType.Pawn =>
+            [
                 (0, forward, false)
-            },
-            _ => new List<(int, int, bool)>()
+            ],
+            _ => []
         };
     }
 
@@ -347,18 +346,18 @@ public class ShogiGameService
 
     private List<Position> GetPossibleMovesOnBoard(Board board, Position from, Piece piece)
     {
-        var moves = new List<Position>();
+        List<Position> moves = [];
         var directions = GetMoveDirections(piece.Type, piece.Owner);
 
         foreach (var (dc, dr, slide) in directions)
         {
-            int col = from.Col + dc;
-            int row = from.Row + dr;
+            var col = from.Col + dc;
+            var row = from.Row + dr;
 
-            while (col >= 0 && col < 9 && row >= 0 && row < 9)
+            while (col is >= 0 and < 9 && row is >= 0 and < 9)
             {
                 var target = board[col, row];
-                if (target == null)
+                if (target is null)
                 {
                     moves.Add(new Position(col, row));
                 }

@@ -28,31 +28,19 @@ public enum Player
     Gote    // 後手（上側）
 }
 
-public class Piece
+// Primary constructor (C# 12+)
+public class Piece(PieceType type, Player owner)
 {
-    public PieceType Type { get; set; }
-    public Player Owner { get; set; }
+    public PieceType Type { get; set; } = type;
+    public Player Owner { get; set; } = owner;
 
-    public Piece(PieceType type, Player owner)
-    {
-        Type = type;
-        Owner = owner;
-    }
-
-    public Piece Clone() => new Piece(Type, Owner);
+    public Piece Clone() => new(Type, Owner);
 
     public bool IsPromoted => Type >= PieceType.PromotedRook;
 
-    public bool CanPromote => Type switch
-    {
-        PieceType.Rook => true,
-        PieceType.Bishop => true,
-        PieceType.Silver => true,
-        PieceType.Knight => true,
-        PieceType.Lance => true,
-        PieceType.Pawn => true,
-        _ => false
-    };
+    // Pattern matching with is pattern (simplified)
+    public bool CanPromote => Type is PieceType.Rook or PieceType.Bishop or PieceType.Silver
+                                   or PieceType.Knight or PieceType.Lance or PieceType.Pawn;
 
     public PieceType Promote() => Type switch
     {
@@ -76,26 +64,22 @@ public class Piece
         _ => Type
     };
 
-    public string GetDisplayChar()
+    public string GetDisplayChar() => Type switch
     {
-        var baseChar = Type switch
-        {
-            PieceType.King => Owner == Player.Sente ? "王" : "玉",
-            PieceType.Rook => "飛",
-            PieceType.Bishop => "角",
-            PieceType.Gold => "金",
-            PieceType.Silver => "銀",
-            PieceType.Knight => "桂",
-            PieceType.Lance => "香",
-            PieceType.Pawn => "歩",
-            PieceType.PromotedRook => "龍",
-            PieceType.PromotedBishop => "馬",
-            PieceType.PromotedSilver => "全",
-            PieceType.PromotedKnight => "圭",
-            PieceType.PromotedLance => "杏",
-            PieceType.PromotedPawn => "と",
-            _ => ""
-        };
-        return baseChar;
-    }
+        PieceType.King => Owner == Player.Sente ? "王" : "玉",
+        PieceType.Rook => "飛",
+        PieceType.Bishop => "角",
+        PieceType.Gold => "金",
+        PieceType.Silver => "銀",
+        PieceType.Knight => "桂",
+        PieceType.Lance => "香",
+        PieceType.Pawn => "歩",
+        PieceType.PromotedRook => "龍",
+        PieceType.PromotedBishop => "馬",
+        PieceType.PromotedSilver => "全",
+        PieceType.PromotedKnight => "圭",
+        PieceType.PromotedLance => "杏",
+        PieceType.PromotedPawn => "と",
+        _ => ""
+    };
 }

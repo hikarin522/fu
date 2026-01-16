@@ -25,29 +25,20 @@ public class Move
         IsDrop = false;
     }
 
-    public static Move CreateDrop(Position to, PieceType pieceType, Player player)
+    // Factory method using target-typed new (C# 9+)
+    public static Move CreateDrop(Position to, PieceType pieceType, Player player) => new()
     {
-        return new Move
-        {
-            From = null,
-            To = to,
-            PieceType = pieceType,
-            IsPromotion = false,
-            IsDrop = true,
-            Player = player
-        };
-    }
+        From = null,
+        To = to,
+        PieceType = pieceType,
+        IsPromotion = false,
+        IsDrop = true,
+        Player = player
+    };
 
-    public string ToNotation()
-    {
-        if (IsDrop)
-        {
-            return $"{To.ToNotation()}{GetPieceChar()}打";
-        }
-
-        var promotion = IsPromotion ? "成" : "";
-        return $"{To.ToNotation()}{GetPieceChar()}{promotion}";
-    }
+    public string ToNotation() => IsDrop
+        ? $"{To.ToNotation()}{GetPieceChar()}打"
+        : $"{To.ToNotation()}{GetPieceChar()}{(IsPromotion ? "成" : "")}";
 
     private string GetPieceChar() => PieceType switch
     {

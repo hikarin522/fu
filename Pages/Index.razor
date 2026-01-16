@@ -113,19 +113,15 @@
     private async Task OnConnected(bool connected)
     {
         Console.WriteLine($"OnConnected: connected={connected}, LocalPlayer={GameService.State.LocalPlayer}");
-        if (connected)
+        if (connected && GameService.State.LocalPlayer is Player.Sente)
         {
-            // 先手がゲーム開始を送信
-            if (GameService.State.LocalPlayer == Player.Sente)
-            {
-                Console.WriteLine("Sente: Starting new game and sending gameStart");
-                GameService.NewGame();
-                await WebRtcService.SendGameStartAsync();
-            }
-            else
-            {
-                Console.WriteLine("Gote: Waiting for gameStart from Sente");
-            }
+            Console.WriteLine("Sente: Starting new game and sending gameStart");
+            GameService.NewGame();
+            await WebRtcService.SendGameStartAsync();
+        }
+        else if (connected)
+        {
+            Console.WriteLine("Gote: Waiting for gameStart from Sente");
         }
         await InvokeAsync(StateHasChanged);
     }
@@ -153,10 +149,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private void OnGameStateChanged()
-    {
-        InvokeAsync(StateHasChanged);
-    }
+    private void OnGameStateChanged() => InvokeAsync(StateHasChanged);
 
     private async Task NewGame()
     {
@@ -164,10 +157,7 @@
         await WebRtcService.SendGameStartAsync();
     }
 
-    private void Resign()
-    {
-        GameService.Resign();
-    }
+    private void Resign() => GameService.Resign();
 
     public void Dispose()
     {

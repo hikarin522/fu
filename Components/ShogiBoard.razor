@@ -93,26 +93,26 @@
     [Parameter] public bool IsFlipped { get; set; }
 
     private Position? SelectedPosition { get; set; }
-    private List<Position> LegalMoves { get; set; } = new();
+    private List<Position> LegalMoves { get; set; } = [];  // Collection expression
     private bool ShowPromotionDialog { get; set; }
     private Position? PendingMoveFrom { get; set; }
     private Position? PendingMoveTo { get; set; }
 
     private bool IsSelectingDropTarget { get; set; }
     private PieceType? SelectedDropPiece { get; set; }
-    private List<Position> DropLegalMoves { get; set; } = new();
+    private List<Position> DropLegalMoves { get; set; } = [];
 
     private void OnCellClick(Position pos)
     {
         if (State.Status != GameStatus.Playing || !State.IsMyTurn)
             return;
 
-        // 持ち駒を選択中の場合
-        if (IsSelectingDropTarget && SelectedDropPiece.HasValue)
+        // 持ち駒を選択中の場合 - pattern matching
+        if (IsSelectingDropTarget && SelectedDropPiece is { } dropPiece)
         {
             if (DropLegalMoves.Contains(pos))
             {
-                var move = Move.CreateDrop(pos, SelectedDropPiece.Value, State.CurrentPlayer);
+                var move = Move.CreateDrop(pos, dropPiece, State.CurrentPlayer);
                 ExecuteMove(move);
             }
             ClearSelection();
@@ -120,12 +120,11 @@
         }
 
         // 既に駒を選択済みで、合法手の位置をクリックした場合
-        if (SelectedPosition.HasValue && LegalMoves.Contains(pos))
+        if (SelectedPosition is { } from && LegalMoves.Contains(pos))
         {
-            var from = SelectedPosition.Value;
             var piece = State.Board[from];
 
-            if (piece != null && GameService.CanPromote(from, pos))
+            if (piece is not null && GameService.CanPromote(from, pos))
             {
                 if (GameService.MustPromote(from, pos))
                 {
@@ -153,7 +152,7 @@
 
         // 自分の駒をクリックした場合
         var clickedPiece = State.Board[pos];
-        if (clickedPiece != null && clickedPiece.Owner == State.CurrentPlayer)
+        if (clickedPiece is { Owner: var owner } && owner == State.CurrentPlayer)
         {
             SelectedPosition = pos;
             LegalMoves = GameService.GetLegalMoves(pos);
@@ -186,10 +185,11 @@
     {
         ShowPromotionDialog = false;
 
-        if (PendingMoveFrom.HasValue && PendingMoveTo.HasValue)
+        // Pattern matching for nullable tuple
+        if (PendingMoveFrom is { } moveFrom && PendingMoveTo is { } moveTo)
         {
-            var piece = State.Board[PendingMoveFrom.Value];
-            var move = new Move(PendingMoveFrom.Value, PendingMoveTo.Value, piece!.Type, promote)
+            var piece = State.Board[moveFrom];
+            var move = new Move(moveFrom, moveTo, piece!.Type, promote)
             {
                 Player = State.CurrentPlayer
             };
@@ -226,8 +226,8 @@
 
     private bool IsLastMovePosition(Position pos)
     {
-        if (State.MoveHistory.Count == 0) return false;
-        var lastMove = State.MoveHistory[^1];
-        return lastMove.To == pos || (lastMove.From.HasValue && lastMove.From.Value == pos);
+        // Pattern matching with list pattern
+        if (State.MoveHistory is not [.., var lastMove]) return false;
+        return lastMove.To == pos || lastMove.From == pos;
     }
 }

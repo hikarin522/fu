@@ -11,9 +11,9 @@ public enum ConnectionState
     Connected
 }
 
-public class WebRtcService : IAsyncDisposable
+// Primary constructor (C# 12+)
+public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 {
-    private readonly IJSRuntime _jsRuntime;
     private DotNetObjectReference<WebRtcService>? _dotNetRef;
 
     public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
@@ -23,52 +23,33 @@ public class WebRtcService : IAsyncDisposable
     public event Action<ConnectionState>? OnStateChanged;
     public event Action? OnGameStart;
 
-    public WebRtcService(IJSRuntime jsRuntime)
-    {
-        _jsRuntime = jsRuntime;
-    }
-
     public async Task InitializeAsync()
     {
         _dotNetRef = DotNetObjectReference.Create(this);
-        await _jsRuntime.InvokeVoidAsync("WebRtc.initialize", _dotNetRef);
+        await jsRuntime.InvokeVoidAsync("WebRtc.initialize", _dotNetRef);
     }
 
-    public async Task<string> CreateOfferAsync()
-    {
-        // Offer生成中は状態を変えない（UIを維持）
-        var offer = await _jsRuntime.InvokeAsync<string>("WebRtc.createOffer");
-        return offer;
-    }
+    public async Task<string> CreateOfferAsync() =>
+        await jsRuntime.InvokeAsync<string>("WebRtc.createOffer");
 
-    public async Task<string> CreateAnswerAsync(string offer)
-    {
-        // Answer生成中は状態を変えない（UIを維持）
-        var answer = await _jsRuntime.InvokeAsync<string>("WebRtc.createAnswer", offer);
-        return answer;
-    }
+    public async Task<string> CreateAnswerAsync(string offer) =>
+        await jsRuntime.InvokeAsync<string>("WebRtc.createAnswer", offer);
 
-    public async Task AcceptAnswerAsync(string answer)
-    {
-        await _jsRuntime.InvokeVoidAsync("WebRtc.acceptAnswer", answer);
-    }
+    public async Task AcceptAnswerAsync(string answer) =>
+        await jsRuntime.InvokeVoidAsync("WebRtc.acceptAnswer", answer);
 
     public async Task SendMoveAsync(Move move)
     {
-        var json = JsonSerializer.Serialize(new MoveMessage
-        {
-            Type = "move",
-            Move = move
-        });
+        var json = JsonSerializer.Serialize(new MoveMessage { Type = "move", Move = move });
         Console.WriteLine($"SendMoveAsync: sending {json}");
-        await _jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
+        await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 
     public async Task SendGameStartAsync()
     {
         var json = JsonSerializer.Serialize(new { Type = "gameStart" });
         Console.WriteLine($"SendGameStartAsync: sending {json}");
-        await _jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
+        await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 
     [JSInvokable]
@@ -121,13 +102,12 @@ public class WebRtcService : IAsyncDisposable
                 case "move":
                     Console.WriteLine($"Deserializing move message: {message}");
                     var moveMessage = JsonSerializer.Deserialize<MoveMessage>(message);
-                    Console.WriteLine($"Deserialized: moveMessage={moveMessage != null}, Move={moveMessage?.Move != null}");
-                    if (moveMessage?.Move != null)
+                    Console.WriteLine($"Deserialized: moveMessage={moveMessage is not null}, Move={moveMessage?.Move is not null}");
+                    if (moveMessage?.Move is { } move)  // Pattern matching with property pattern
                     {
-                        var m = moveMessage.Move;
-                        Console.WriteLine($"Move details: From=({m.From?.Col},{m.From?.Row}) To=({m.To.Col},{m.To.Row}) PieceType={m.PieceType}");
+                        Console.WriteLine($"Move details: From=({move.From?.Col},{move.From?.Row}) To=({move.To.Col},{move.To.Row}) PieceType={move.PieceType}");
                         Console.WriteLine($"Invoking OnMoveReceived");
-                        OnMoveReceived?.Invoke(moveMessage.Move);
+                        OnMoveReceived?.Invoke(move);
                     }
                     break;
 
@@ -145,7 +125,7 @@ public class WebRtcService : IAsyncDisposable
 
     public async Task DisconnectAsync()
     {
-        await _jsRuntime.InvokeVoidAsync("WebRtc.disconnect");
+        await jsRuntime.InvokeVoidAsync("WebRtc.disconnect");
         State = ConnectionState.Disconnected;
         OnStateChanged?.Invoke(State);
     }
@@ -156,7 +136,7 @@ public class WebRtcService : IAsyncDisposable
         _dotNetRef?.Dispose();
     }
 
-    private class MoveMessage
+    private sealed class MoveMessage  // sealed for performance
     {
         public string Type { get; set; } = "";
         public Move? Move { get; set; }

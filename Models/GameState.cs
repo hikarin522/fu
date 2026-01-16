@@ -11,9 +11,9 @@ public enum GameStatus
 
 public class CapturedPieces
 {
-    private readonly Dictionary<PieceType, int> _pieces = new();
+    private readonly Dictionary<PieceType, int> _pieces = [];  // Collection expression (C# 12+)
 
-    public int GetCount(PieceType type) => _pieces.TryGetValue(type, out var count) ? count : 0;
+    public int GetCount(PieceType type) => _pieces.GetValueOrDefault(type);
 
     public void Add(PieceType type)
     {
@@ -29,9 +29,8 @@ public class CapturedPieces
             _ => type
         };
 
-        if (!_pieces.ContainsKey(baseType))
-            _pieces[baseType] = 0;
-        _pieces[baseType]++;
+        // CollectionsMarshal or indexer with default
+        _pieces[baseType] = _pieces.GetValueOrDefault(baseType) + 1;
     }
 
     public bool Remove(PieceType type)
@@ -44,17 +43,15 @@ public class CapturedPieces
         return false;
     }
 
-    public IEnumerable<(PieceType type, int count)> GetAll()
-    {
-        foreach (var kvp in _pieces.Where(x => x.Value > 0))
-            yield return (kvp.Key, kvp.Value);
-    }
+    // LINQ with tuples
+    public IEnumerable<(PieceType type, int count)> GetAll() =>
+        _pieces.Where(x => x.Value > 0).Select(x => (x.Key, x.Value));
 
     public CapturedPieces Clone()
     {
         var clone = new CapturedPieces();
-        foreach (var kvp in _pieces)
-            clone._pieces[kvp.Key] = kvp.Value;
+        foreach (var (key, value) in _pieces)
+            clone._pieces[key] = value;
         return clone;
     }
 }
@@ -66,30 +63,25 @@ public class GameState
     public GameStatus Status { get; set; } = GameStatus.WaitingForConnection;
     public CapturedPieces SenteCaptured { get; set; } = new();
     public CapturedPieces GoteCaptured { get; set; } = new();
-    public List<Move> MoveHistory { get; set; } = new();
-    public Player LocalPlayer { get; set; } = Player.None;  // このクライアントが操作するプレイヤー
+    public List<Move> MoveHistory { get; set; } = [];  // Collection expression
+    public Player LocalPlayer { get; set; } = Player.None;
 
     public CapturedPieces GetCapturedPieces(Player player) =>
         player == Player.Sente ? SenteCaptured : GoteCaptured;
 
     public bool IsMyTurn => LocalPlayer == CurrentPlayer;
 
-    public void SwitchPlayer()
-    {
+    public void SwitchPlayer() =>
         CurrentPlayer = CurrentPlayer == Player.Sente ? Player.Gote : Player.Sente;
-    }
 
-    public GameState Clone()
+    public GameState Clone() => new()
     {
-        return new GameState
-        {
-            Board = Board.Clone(),
-            CurrentPlayer = CurrentPlayer,
-            Status = Status,
-            SenteCaptured = SenteCaptured.Clone(),
-            GoteCaptured = GoteCaptured.Clone(),
-            MoveHistory = new List<Move>(MoveHistory),
-            LocalPlayer = LocalPlayer
-        };
-    }
+        Board = Board.Clone(),
+        CurrentPlayer = CurrentPlayer,
+        Status = Status,
+        SenteCaptured = SenteCaptured.Clone(),
+        GoteCaptured = GoteCaptured.Clone(),
+        MoveHistory = [.. MoveHistory],  // Spread element (C# 12+)
+        LocalPlayer = LocalPlayer
+    };
 }
