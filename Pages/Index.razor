@@ -32,7 +32,11 @@
     </header>
 
     <main class="game-main">
-        @if (!WebRtcService.IsConnected)
+        @if (!string.IsNullOrEmpty(InitError))
+        {
+            <div class="error-message">初期化エラー: @InitError</div>
+        }
+        else if (!WebRtcService.IsConnected)
         {
             <ConnectionPanel
                 WebRtcService="WebRtcService"
@@ -81,13 +85,22 @@
 
 @code {
     private bool IsFlipped => GameService.State.LocalPlayer == Player.Gote;
+    private string? InitError { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
-        await WebRtcService.InitializeAsync();
-        WebRtcService.OnMoveReceived += OnRemoteMoveReceived;
-        WebRtcService.OnGameStart += OnRemoteGameStart;
-        GameService.OnStateChanged += OnGameStateChanged;
+        try
+        {
+            await WebRtcService.InitializeAsync();
+            WebRtcService.OnMoveReceived += OnRemoteMoveReceived;
+            WebRtcService.OnGameStart += OnRemoteGameStart;
+            GameService.OnStateChanged += OnGameStateChanged;
+        }
+        catch (Exception ex)
+        {
+            InitError = ex.Message;
+            Console.WriteLine($"Init error: {ex}");
+        }
     }
 
     private void OnPlayerAssigned(bool isSente)

@@ -122,16 +122,19 @@
         {
             IsProcessing = true;
             ErrorMessage = "";
+            StateHasChanged();
             Offer = await WebRtcService.CreateOfferAsync();
             await OnPlayerAssigned.InvokeAsync(true); // true = Sente
         }
         catch (Exception ex)
         {
             ErrorMessage = $"エラー: {ex.Message}";
+            Console.WriteLine($"CreateOffer error: {ex}");
         }
         finally
         {
             IsProcessing = false;
+            StateHasChanged();
         }
     }
 
@@ -141,16 +144,19 @@
         {
             IsProcessing = true;
             ErrorMessage = "";
+            StateHasChanged();
             GeneratedAnswer = await WebRtcService.CreateAnswerAsync(ReceivedOffer);
             await OnPlayerAssigned.InvokeAsync(false); // false = Gote
         }
         catch (Exception ex)
         {
             ErrorMessage = $"エラー: {ex.Message}";
+            Console.WriteLine($"CreateAnswer error: {ex}");
         }
         finally
         {
             IsProcessing = false;
+            StateHasChanged();
         }
     }
 
