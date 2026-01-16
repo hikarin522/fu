@@ -74,27 +74,37 @@ public class WebRtcService : IAsyncDisposable
     [JSInvokable]
     public void OnConnectionStateChanged(string state)
     {
-        State = state switch
+        var newState = state switch
         {
             "connected" => ConnectionState.Connected,
             "connecting" => ConnectionState.Connecting,
             _ => ConnectionState.Disconnected
         };
-        OnStateChanged?.Invoke(State);
+        if (State != newState)
+        {
+            State = newState;
+            OnStateChanged?.Invoke(State);
+        }
     }
 
     [JSInvokable]
     public void OnDataChannelOpen()
     {
-        State = ConnectionState.Connected;
-        OnStateChanged?.Invoke(State);
+        if (State != ConnectionState.Connected)
+        {
+            State = ConnectionState.Connected;
+            OnStateChanged?.Invoke(State);
+        }
     }
 
     [JSInvokable]
     public void OnDataChannelClose()
     {
-        State = ConnectionState.Disconnected;
-        OnStateChanged?.Invoke(State);
+        if (State != ConnectionState.Disconnected)
+        {
+            State = ConnectionState.Disconnected;
+            OnStateChanged?.Invoke(State);
+        }
     }
 
     [JSInvokable]
