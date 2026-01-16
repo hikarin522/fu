@@ -6,14 +6,16 @@ public readonly struct Position : IEquatable<Position>
 {
     // 将棋の座標系: 右上が1一(0,0)、左下が9九(8,8)
     // Colは筋(1-9)、Rowは段(一-九)
+    [JsonInclude]
     public int Col { get; init; }  // 0-8 (内部表現)
+    [JsonInclude]
     public int Row { get; init; }  // 0-8 (内部表現)
 
     [JsonConstructor]
-    public Position(int col, int row)
+    public Position(int Col, int Row)  // パラメータ名を大文字にしてJSONプロパティ名と一致させる
     {
-        Col = col;
-        Row = row;
+        this.Col = Col;
+        this.Row = Row;
     }
 
     public bool IsValid => Col >= 0 && Col < 9 && Row >= 0 && Row < 9;

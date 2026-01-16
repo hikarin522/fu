@@ -114,6 +114,8 @@ public class WebRtcService : IAsyncDisposable
                     Console.WriteLine($"Deserialized: moveMessage={moveMessage != null}, Move={moveMessage?.Move != null}");
                     if (moveMessage?.Move != null)
                     {
+                        var m = moveMessage.Move;
+                        Console.WriteLine($"Move details: From=({m.From?.Col},{m.From?.Row}) To=({m.To.Col},{m.To.Row}) PieceType={m.PieceType}");
                         Console.WriteLine($"Invoking OnMoveReceived");
                         OnMoveReceived?.Invoke(moveMessage.Move);
                     }
