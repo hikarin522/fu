@@ -18,11 +18,14 @@ public readonly struct Position : IEquatable<Position>
         this.Row = Row;
     }
 
+    [JsonIgnore]
     public bool IsValid => Col >= 0 && Col < 9 && Row >= 0 && Row < 9;
 
     // 先手から見た段 (0が一段目/相手陣)
+    [JsonIgnore]
     public int SenteRow => Row;
     // 後手から見た段 (0が一段目/相手陣)
+    [JsonIgnore]
     public int GoteRow => 8 - Row;
 
     // 表示用 (9一 形式)
