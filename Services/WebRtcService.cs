@@ -109,9 +109,12 @@ public class WebRtcService : IAsyncDisposable
             switch (type)
             {
                 case "move":
+                    Console.WriteLine($"Deserializing move message: {message}");
                     var moveMessage = JsonSerializer.Deserialize<MoveMessage>(message);
+                    Console.WriteLine($"Deserialized: moveMessage={moveMessage != null}, Move={moveMessage?.Move != null}");
                     if (moveMessage?.Move != null)
                     {
+                        Console.WriteLine($"Invoking OnMoveReceived");
                         OnMoveReceived?.Invoke(moveMessage.Move);
                     }
                     break;

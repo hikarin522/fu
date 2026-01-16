@@ -1,12 +1,15 @@
+using System.Text.Json.Serialization;
+
 namespace ShogiGame.Models;
 
 public readonly struct Position : IEquatable<Position>
 {
     // 将棋の座標系: 右上が1一(0,0)、左下が9九(8,8)
     // Colは筋(1-9)、Rowは段(一-九)
-    public int Col { get; }  // 0-8 (内部表現)
-    public int Row { get; }  // 0-8 (内部表現)
+    public int Col { get; init; }  // 0-8 (内部表現)
+    public int Row { get; init; }  // 0-8 (内部表現)
 
+    [JsonConstructor]
     public Position(int col, int row)
     {
         Col = col;

@@ -155,6 +155,7 @@
     private string GeneratedAnswer { get; set; } = "";
     private string ErrorMessage { get; set; } = "";
     private bool IsProcessing { get; set; }
+    private bool HasNotifiedConnected { get; set; }
 
     private void SelectPlayer(Player player)
     {
@@ -179,8 +180,9 @@
     {
         InvokeAsync(async () =>
         {
-            if (state == Services.ConnectionState.Connected)
+            if (state == Services.ConnectionState.Connected && !HasNotifiedConnected)
             {
+                HasNotifiedConnected = true;
                 await OnConnected.InvokeAsync(true);
             }
             StateHasChanged();
