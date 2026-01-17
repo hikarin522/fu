@@ -137,14 +137,17 @@ public class ShogiEngineService : IAsyncDisposable
         else {
             // 新規局面は初期化
             this._candidates.Clear();
+            this.Depth = 0;
+            this.Evaluation = null;
+            this.MateIn = null;
+            this.BestMove = null;
+            this.PrincipalVariation = null;
         }
 
         this._isAnalyzing = true;
 
-        // MultiPVを設定
-        if (multiPv > 1) {
-            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
-        }
+        // MultiPVを設定（常に送信して状態を確実に同期）
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
 
         // depth=0 で無限探索
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
