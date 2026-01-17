@@ -1313,35 +1313,22 @@ a, .btn-link {
     overflow-y: auto;
 }
 
-/* ブランチ（インデントで分岐を表現） */
+/* ブランチ */
 .tree-branch {
-    border-left: 2px solid #4ec9b0;
-    padding-left: 8px;
-    margin-bottom: 4px;
+    display: flex;
+    flex-direction: column;
 }
 
-.tree-branch:first-child {
-    border-left-color: #4ec9b0;
+/* 各行（SVG + テキスト） */
+.tree-row {
+    display: flex;
+    align-items: center;
+    height: 24px;
 }
 
-.tree-branch:nth-child(2) {
-    border-left-color: #ce9178;
-}
-
-.tree-branch:nth-child(3) {
-    border-left-color: #dcdcaa;
-}
-
-.tree-branch:nth-child(4) {
-    border-left-color: #c586c0;
-}
-
-.tree-branch:nth-child(5) {
-    border-left-color: #9cdcfe;
-}
-
-.tree-branch:nth-child(n+6) {
-    border-left-color: #d16969;
+/* SVGグラフ */
+.tree-graph {
+    flex-shrink: 0;
 }
 
 /* 手のテキスト */
@@ -1364,16 +1351,6 @@ a, .btn-link {
     background: #0078d4;
     color: white;
     font-weight: bold;
-}
-
-.tree-node.branch-start {
-    color: #ce9178;
-    font-style: italic;
-}
-
-.tree-node.branch-start::before {
-    content: "↳ ";
-    color: #888;
 }
 
 /* 検討モード */
