@@ -49,10 +49,10 @@ if (typeof window === 'undefined') {
                     }
                     newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
 
-                    // Fix: Check for null body status codes (204, 205, 304)
-                    // These status codes cannot have a body
-                    const nullBodyStatus = [204, 205, 304];
-                    if (nullBodyStatus.includes(response.status)) {
+                    // Fix: Check for null body status codes (101, 204, 205, 304)
+                    // and also handle cases where response.body is null
+                    const nullBodyStatus = [101, 204, 205, 304];
+                    if (nullBodyStatus.includes(response.status) || response.body === null) {
                         return new Response(null, {
                             status: response.status,
                             statusText: response.statusText,

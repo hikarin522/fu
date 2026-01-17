@@ -22,8 +22,10 @@ async function initShogiEngine() {
         });
 
         // YaneuraOu is a factory function that returns a module instance
-        // Wait for the module to be ready
-        const yaneuraou = await YaneuraOu();
+        // Configure locateFile to find .wasm and .data files in the correct directory
+        const yaneuraou = await YaneuraOu({
+            locateFile: (path) => `lib/yaneuraou/${path}`
+        });
 
         // Set up message listener
         yaneuraou.addMessageListener((line) => {

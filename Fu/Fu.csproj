@@ -29,6 +29,18 @@
       DestinationFolder="$(YaneuraOuDir)"
       SkipUnchangedFiles="true"
       Condition="!Exists('$(YaneuraOuDir)/yaneuraou.wasm')" />
+
+    <DownloadFile
+      SourceUrl="https://unpkg.com/yaneuraou.wasm@0.1.2/yaneuraou.data"
+      DestinationFolder="$(YaneuraOuDir)"
+      SkipUnchangedFiles="true"
+      Condition="!Exists('$(YaneuraOuDir)/yaneuraou.data')" />
+
+    <DownloadFile
+      SourceUrl="https://unpkg.com/yaneuraou.wasm@0.1.2/yaneuraou.worker.js"
+      DestinationFolder="$(YaneuraOuDir)"
+      SkipUnchangedFiles="true"
+      Condition="!Exists('$(YaneuraOuDir)/yaneuraou.worker.js')" />
   </Target>
 
 </Project>
