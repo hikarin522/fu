@@ -131,12 +131,13 @@ public class ShogiGameService
             return false;
         }
 
+        // 検討モード中は手を指せない（「ここから再開」を押す必要がある）
         if (this.State.IsReviewing) {
-            await this.BranchFromCurrentPositionAsync();
-        } else {
-            // 通常の対局中でも、MoveTreeのCurrentNodeをMoveHistoryと同期する
-            this.SyncMoveTreeToCurrentPosition();
+            return false;
         }
+
+        // MoveTreeのCurrentNodeをMoveHistoryと同期する
+        this.SyncMoveTreeToCurrentPosition();
 
         if (move.IsDrop) {
             return await this.TryDropPieceAsync(move);
