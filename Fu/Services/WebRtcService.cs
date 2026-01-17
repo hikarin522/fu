@@ -45,6 +45,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public event Func<Task>? OnDataChannelReady;
     public event Func<Participant, Task>? OnParticipantJoined;
     public event Func<string, Task>? OnParticipantLeft;
+    public event Func<Task>? OnBecameHost;
     public event Func<GameStartInfo, Task>? OnGameStartWithPlayers;
     public event Func<Task>? OnResignReceived;
     public event Func<Task>? OnGameStateRequested;
@@ -187,6 +188,16 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 
         if (OnParticipantLeft is { } handler) {
             await handler(peerId);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnBecameHostCallback()
+    {
+        this.IsHost = true;
+
+        if (OnBecameHost is { } handler) {
+            await handler();
         }
     }
 

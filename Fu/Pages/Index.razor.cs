@@ -365,17 +365,28 @@ public partial class Index : IAsyncDisposable
     {
         // ホストがゲーム状態リクエストを受信したら、現在の状態を送信
         if (this.WebRtcService.IsHost && this.GameService.State.Status != GameStatus.WaitingForConnection) {
-            await this.WebRtcService.SendGameStateSyncAsync(
-                this.GameService.State.MoveHistory,
-                this.SentePeerId ?? "",
-                this.GotePeerId ?? "",
-                this.SenteNickname,
-                this.GoteNickname,
-                this.GameService.State.Status,
-                this.CurrentEvaluationOptions
-            );
+            await this.SendGameStateSyncAsync();
         }
     }
+
+    private Task OnBecameHostAsync()
+    {
+        // ホストを引き継いだ時点で特に処理は不要
+        // 新しい参加者がGameStateRequestを送ってきたら応答する
+        Console.WriteLine("Became host");
+        return Task.CompletedTask;
+    }
+
+    private Task SendGameStateSyncAsync() =>
+        this.WebRtcService.SendGameStateSyncAsync(
+            this.GameService.State.MoveHistory,
+            this.SentePeerId ?? "",
+            this.GotePeerId ?? "",
+            this.SenteNickname,
+            this.GoteNickname,
+            this.GameService.State.Status,
+            this.CurrentEvaluationOptions
+        );
 
     private async Task OnGameStateSyncReceivedAsync(GameStateSyncInfo info)
     {
@@ -636,6 +647,7 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnRematchReceived += this.OnRematchReceivedAsync;
         this.WebRtcService.OnReviewStartReceived += this.OnReviewStartReceivedAsync;
         this.WebRtcService.OnReviewMoveReceived += this.OnReviewMoveReceivedAsync;
+        this.WebRtcService.OnBecameHost += this.OnBecameHostAsync;
         this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
         this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
         this.GameService.OnReviewStartedAsync += this.OnReviewStartedAsync;
@@ -655,6 +667,7 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnRematchReceived -= this.OnRematchReceivedAsync;
         this.WebRtcService.OnReviewStartReceived -= this.OnReviewStartReceivedAsync;
         this.WebRtcService.OnReviewMoveReceived -= this.OnReviewMoveReceivedAsync;
+        this.WebRtcService.OnBecameHost -= this.OnBecameHostAsync;
         this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
         this.GameService.OnBranchResumedAsync -= this.OnBranchResumedAsync;
         this.GameService.OnReviewStartedAsync -= this.OnReviewStartedAsync;

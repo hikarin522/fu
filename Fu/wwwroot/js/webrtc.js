@@ -210,11 +210,27 @@ async function joinTrysteroRoom(roomId) {
         const dotNetId = trysteroToDotNetId.get(tryseteroPeerId);
 
         if (dotNetId) {
+            // 退出したピアがホストかどうかを確認
+            const leftParticipant = participants.get(dotNetId);
+            const wasHost = leftParticipant?.isHost ?? false;
+
             participants.delete(dotNetId);
             trysteroToDotNetId.delete(tryseteroPeerId);
 
             if (dotNetRef) {
                 dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
+
+                // ホストが退出した場合、自分がホストを引き継ぐ
+                if (wasHost && !isHost) {
+                    isHost = true;
+                    // 自分の参加者情報を更新
+                    const myInfo = participants.get(myPeerId);
+                    if (myInfo) {
+                        myInfo.isHost = true;
+                    }
+                    console.log('Host left, becoming new host:', myPeerId);
+                    dotNetRef.invokeMethodAsync('OnBecameHostCallback');
+                }
                 // 注: ルームは維持し続ける（相手が再接続してくる可能性があるため）
                 // OnDataChannelCloseは呼ばない
             }
