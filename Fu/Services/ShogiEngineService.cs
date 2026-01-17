@@ -45,6 +45,8 @@ public class ShogiEngineService : IAsyncDisposable
     private const int MaxCacheSize = 100;
     private string? _currentSfen;
     private Player _currentPlayer = Player.Sente; // 現在分析中の手番
+    private int _analysisVersion; // 分析バージョン（古い結果を無視するため）
+    private int _currentAnalysisVersion; // 現在処理中の分析バージョン
 
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
@@ -152,6 +154,9 @@ public class ShogiEngineService : IAsyncDisposable
         this.IsThreatening = false;
         this.ThreateningMateIn = null;
 
+        // 新しい分析バージョンを開始（古い結果を無視するため）
+        this._analysisVersion++;
+
         // キャッシュをチェック
         if (this._cache.TryGetValue(sfen, out var cached)) {
             // キャッシュから復元（即座に表示）
@@ -167,6 +172,7 @@ public class ShogiEngineService : IAsyncDisposable
                 }
                 return;
             }
+            // 継続して分析する場合、キャッシュの深さから継続（新しい結果は上書きされる）
         }
         else {
             // 新規局面は初期化
@@ -317,6 +323,11 @@ public class ShogiEngineService : IAsyncDisposable
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
 
+        // 本局面で既に詰みがある場合は詰めろを設定しない
+        if (this.MateIn.HasValue) {
+            return;
+        }
+
         // 相手番で詰みが見つかった場合、元の手番側に詰めろがかかっている
         if (info.MateIn.HasValue && info.MateIn.Value > 0) {
             this.IsThreatening = true;
@@ -331,40 +342,80 @@ public class ShogiEngineService : IAsyncDisposable
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
 
+        // 現在の分析バージョンより古い結果は無視（局面変更後の古い結果が来た場合）
+        if (this._currentAnalysisVersion != this._analysisVersion) {
+            // まだ現在バージョンの結果を受け取っていない場合、depth=1で同期
+            if (info.Depth.HasValue && info.Depth.Value == 1 && this._currentAnalysisVersion < this._analysisVersion) {
+                // 新しい分析バージョンの最初の結果
+                this._currentAnalysisVersion = this._analysisVersion;
+                // 新しい分析なので状態をリセット
+                this.Depth = 0;
+                this.MateIn = null;
+                this.IsThreatening = false;
+                this.ThreateningMateIn = null;
+            }
+            else {
+                // 古い分析の結果は無視
+                return;
+            }
+        }
+
         // 深さがない、または現在より深い場合のみメイン評価値を更新
         var isNewDepth = info.Depth.HasValue && info.Depth.Value > this.Depth;
+        // ただし、詰みが検出された場合は深さに関係なく更新（キャッシュから復元した場合も詰みを優先）
+        var hasMate = info.MateIn.HasValue && this.MateIn is null;
 
-        // 評価値を先手視点に変換（エンジンは現在の手番視点で返すため）
+        // 既に詰みが検出されている場合、cp スコアでは上書きしない
+        // （詰み検出後の別分析結果で詰みが消えることを防ぐ）
+        if (this.MateIn.HasValue && !info.MateIn.HasValue) {
+            return;
+        }
+
+        // 評価値を先手視点に変換
+        // USI標準では手番側目線で返すため、後手番なら符号反転
+        // ※YaneuraOuが先手目線固定で返す場合は変換不要
         var normalizedScore = this._currentPlayer == Player.Gote ? -info.Score : info.Score;
 
-        // メインの評価値を更新（multipv=1または指定なしの場合、かつ新しい深さの場合）
-        if ((info.MultiPv is null or 1) && isNewDepth) {
-            this.Depth = info.Depth!.Value;
+        // デバッグ用：変換前後の値をログ出力
+        if (info.Score.HasValue) {
+            Console.WriteLine($"[Eval] Player={this._currentPlayer}, Raw={info.Score}, Normalized={normalizedScore}, Depth={info.Depth}");
+        }
+
+        // メインの評価値を更新（multipv=1または指定なしの場合、かつ新しい深さの場合または詰みが見つかった場合）
+        if ((info.MultiPv is null or 1) && (isNewDepth || hasMate)) {
+            if (isNewDepth) {
+                this.Depth = info.Depth!.Value;
+            }
             if (normalizedScore.HasValue) {
                 this.Evaluation = normalizedScore.Value;
-
-                // 詰みは手番視点でそのまま保存
-                if (info.MateIn.HasValue) {
-                    this.MateIn = info.MateIn.Value;
-                    this.MatePlayer = this._currentPlayer;
-                    // 詰みが検出されたら詰めろをリセット（詰みと詰めろは排他）
-                    this.IsThreatening = false;
-                    this.ThreateningMateIn = null;
-                }
-                else {
-                    this.MateIn = null;
-                }
             }
+
+            // 詰みは手番視点でそのまま保存
+            if (info.MateIn.HasValue) {
+                this.MateIn = info.MateIn.Value;
+                this.MatePlayer = this._currentPlayer;
+                // 詰みが検出されたら詰めろをリセット（詰みと詰めろは排他）
+                this.IsThreatening = false;
+                this.ThreateningMateIn = null;
+            }
+            else if (isNewDepth) {
+                // 新しい深さで詰みがない場合のみリセット
+                this.MateIn = null;
+            }
+
             if (info.Pv is not null) {
                 this.PrincipalVariation = info.Pv;
             }
+
             // 新しい深さになったら前の候補手を保存してからクリア
-            this._previousCandidates.Clear();
-            foreach (var kvp in this._candidates) {
-                this._previousCandidates[kvp.Key] = kvp.Value;
+            if (isNewDepth) {
+                this._previousCandidates.Clear();
+                foreach (var kvp in this._candidates) {
+                    this._previousCandidates[kvp.Key] = kvp.Value;
+                }
+                this._candidates.Clear();
+                this._newDepthCandidateCount = 0;
             }
-            this._candidates.Clear();
-            this._newDepthCandidateCount = 0;
         }
 
         // 候補手リストを更新（現在の深さ以上の結果のみ）
