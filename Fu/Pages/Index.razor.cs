@@ -108,7 +108,7 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(async () => {
             if (this.WebRtcService.IsHost) {
                 // ホストの場合は対局ダイアログを表示
-                this.ShowNewGameDialog = true;
+                this.OpenNewGameDialog();
             }
             else {
                 // 非ホストの場合は現在のゲーム状態をリクエスト
