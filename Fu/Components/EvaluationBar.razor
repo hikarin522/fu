@@ -194,22 +194,20 @@
     {
         if (string.IsNullOrEmpty(usiMove) || usiMove.Length < 4) return usiMove ?? "---";
 
+        // 通常の移動（例: 7g7f, 7g7f+）
+        var fromCol = 8 - (usiMove[0] - '1');  // 内部座標: 0-8
+        var fromRow = usiMove[1] - 'a';
+        var toCol = 9 - (usiMove[2] - '1');    // 表示用: 1-9
+        var toRow = usiMove[3] - 'a';
+
         // 駒打ち（例: P*3d）
         if (usiMove[1] == '*') {
             var piece = usiMove[0] switch {
                 'P' => "歩", 'L' => "香", 'N' => "桂", 'S' => "銀",
                 'G' => "金", 'B' => "角", 'R' => "飛", _ => usiMove[0].ToString()
             };
-            var toCol = 9 - (usiMove[2] - '1');
-            var toRow = usiMove[3] - 'a';
             return $"{toCol}{RowKanji[toRow]}{piece}打";
         }
-
-        // 通常の移動（例: 7g7f, 7g7f+）
-        var fromCol = 8 - (usiMove[0] - '1');  // 内部座標: 0-8
-        var fromRow = usiMove[1] - 'a';
-        var toCol = 9 - (usiMove[2] - '1');    // 表示用: 1-9
-        var toRow = usiMove[3] - 'a';
         var promote = usiMove.Length > 4 && usiMove[4] == '+' ? "成" : "";
 
         // 盤面から駒の種類を取得
