@@ -35,23 +35,30 @@ jobs:
       - name: Publish
         run: dotnet publish Fu/Fu.csproj -c Release -o publish --no-build
 
-      - name: Generate blazor.boot.json and importmap for static hosting
+      - name: Setup static assets for GitHub Pages
         run: |
-          # .NET 10 uses staticwebassets.endpoints.json instead of blazor.boot.json
-          # Generate blazor.boot.json and importmap from endpoints file for GitHub Pages compatibility
+          # .NET 10 uses staticwebassets.endpoints.json for asset resolution
+          # Copy it to wwwroot/_framework, generate blazor.boot.json (fallback), and importmap
           python3 << 'EOF'
           import json
           import os
           import re
+          import shutil
 
           endpoints_file = 'publish/Fu.staticwebassets.endpoints.json'
+          target_endpoints = 'publish/wwwroot/_framework/staticwebassets.endpoints.json'
           boot_file = 'publish/wwwroot/_framework/blazor.boot.json'
           index_file = 'publish/wwwroot/index.html'
 
           with open(endpoints_file, 'r') as f:
               data = json.load(f)
 
-          # Build resources from endpoints
+          # Copy endpoints file to _framework directory
+          os.makedirs(os.path.dirname(target_endpoints), exist_ok=True)
+          shutil.copy(endpoints_file, target_endpoints)
+          print(f"Copied {endpoints_file} to {target_endpoints}")
+
+          # Build resources and importmap from endpoints
           resources = {"assembly": {}, "runtime": {}}
           importmap_imports = {}
 
@@ -62,11 +69,10 @@ jobs:
               if not route.startswith('_framework/'):
                   continue
 
-              # Get integrity hash
               integrity = props.get('integrity', '')
               filename = route.replace('_framework/', '')
 
-              # Categorize resources
+              # Categorize resources for blazor.boot.json
               if route.endswith('.wasm'):
                   if 'dotnet.native' in route:
                       resources['runtime'][filename] = integrity
@@ -74,46 +80,42 @@ jobs:
                       resources['assembly'][filename] = integrity
               elif route.endswith('.js') and 'dotnet' in route:
                   resources['runtime'][filename] = integrity
-                  # Add to importmap for JS modules
-                  # Map fingerprinted name to the actual file
+                  # Map non-fingerprinted name to fingerprinted file for importmap
                   base_name = re.sub(r'\.[a-z0-9]+\.js$', '.js', filename)
                   if base_name != filename:
                       importmap_imports[f"./{base_name}"] = f"./{filename}"
-              elif route.endswith('.dat'):
-                  if 'icu' not in route.lower():
-                      continue
+              elif route.endswith('.dat') and 'icu' in route.lower():
                   resources.setdefault('icu', {})[filename] = integrity
 
-          # Build boot config
+          # Generate blazor.boot.json (fallback for compatibility)
           boot_config = {
               "mainAssemblyName": "Fu",
               "resources": resources,
               "cacheBootResources": False,
               "debugLevel": 0
           }
-
-          os.makedirs(os.path.dirname(boot_file), exist_ok=True)
           with open(boot_file, 'w') as f:
               json.dump(boot_config, f, indent=2)
-
           print(f"Generated {boot_file}")
 
           # Generate importmap and inject into index.html
+          with open(index_file, 'r') as f:
+              html = f.read()
+
           if importmap_imports:
               importmap = {"imports": importmap_imports}
               importmap_script = f'<script type="importmap">\n{json.dumps(importmap, indent=2)}\n</script>'
 
-              with open(index_file, 'r') as f:
-                  html = f.read()
-
               # Insert importmap before the first script tag
               html = html.replace('<script src="coi-serviceworker.js">', f'{importmap_script}\n    <script src="coi-serviceworker.js">')
 
-              with open(index_file, 'w') as f:
-                  f.write(html)
-
               print(f"Injected importmap into {index_file}")
               print(f"Importmap: {json.dumps(importmap, indent=2)}")
+
+          with open(index_file, 'w') as f:
+              f.write(html)
+
+          print("Static assets setup complete")
           EOF
 
       - name: Change base href
