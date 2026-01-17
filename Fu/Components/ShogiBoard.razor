@@ -1,4 +1,79 @@
 <div class="shogi-container">
+    @* 駒打ち矢印用のSVGオーバーレイ（コンテナ全体をカバー） *@
+    @if (CandidateMoves?.Count > 0 && GetDropArrows().Any())
+    {
+        <svg class="drop-arrows-overlay">
+            @foreach (var arrow in GetDropArrows())
+            {
+                @* 始点: 持ち駒パネル内の駒位置 *@
+                var isPlayerCaptured = (CandidateMovePlayer == Player.Sente && !IsFlipped) ||
+                                       (CandidateMovePlayer == Player.Gote && IsFlipped);
+                var capturedPieces = isPlayerCaptured
+                    ? (IsFlipped ? DisplayGoteCaptured : DisplaySenteCaptured)
+                    : (IsFlipped ? DisplaySenteCaptured : DisplayGoteCaptured);
+
+                @* 持ち駒パネル内の駒のインデックスを計算 *@
+                var pieceIndex = GetCapturedPieceIndex(capturedPieces, arrow.DropPiece!.Value);
+                if (pieceIndex >= 0)
+                {
+                    @* 座標計算（持ち駒は横並び、各駒約50px幅） *@
+                    var pieceWidth = 50.0;
+                    var panelPadding = 12.0;
+                    var x1 = panelPadding + pieceIndex * pieceWidth + pieceWidth / 2;
+
+                    @* Y座標: 下のパネルなら下から、上のパネルなら上から *@
+                    @* captured-piecesの高さは約60px、ラベル20px + 駒40px *@
+                    var capturedHeight = 60.0;
+                    var boardAreaTop = capturedHeight + 10; // gap: 10px
+                    var boardAreaHeight = 450.0 + 22; // 盤面 + col-labels
+                    var y1 = isPlayerCaptured
+                        ? boardAreaTop + boardAreaHeight + 10 + capturedHeight / 2  // 下パネル
+                        : capturedHeight / 2;  // 上パネル
+
+                    @* 移動先: 盤面内の座標 *@
+                    var x2 = arrow.ToCol * 50 + 25;
+                    var y2Board = arrow.ToRow * 50 + 25;
+                    var y2 = boardAreaTop + 22 + y2Board; // col-labels(22px)を加算
+
+                    var dx = x2 - x1;
+                    var dy = y2 - y1;
+                    var length = Math.Sqrt(dx * dx + dy * dy);
+                    if (length > 0)
+                    {
+                        var shortenRatio = 15 / length;
+                        var adjX2 = x2 - dx * shortenRatio;
+                        var adjY2 = y2 - dy * shortenRatio;
+
+                        var arrowHeadLength = arrow.StrokeWidth * 2.5;
+                        var arrowHeadWidth = arrow.StrokeWidth * 1.5;
+                        var unitX = dx / length;
+                        var unitY = dy / length;
+                        var perpX = -unitY;
+                        var perpY = unitX;
+
+                        var baseX = adjX2 - unitX * arrowHeadLength;
+                        var baseY = adjY2 - unitY * arrowHeadLength;
+
+                        var leftX = baseX + perpX * arrowHeadWidth;
+                        var leftY = baseY + perpY * arrowHeadWidth;
+                        var rightX = baseX - perpX * arrowHeadWidth;
+                        var rightY = baseY - perpY * arrowHeadWidth;
+
+                        <line x1="@x1.ToString("F1")" y1="@y1.ToString("F1")"
+                              x2="@baseX.ToString("F1")" y2="@baseY.ToString("F1")"
+                              stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
+                              stroke-linecap="round"
+                              opacity="0.7" />
+
+                        <path d="M @adjX2.ToString("F1") @adjY2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
+                              fill="#2266cc"
+                              opacity="0.7" />
+                    }
+                }
+            }
+        </svg>
+    }
+
     <CapturedPiecesPanel
         Pieces="@(IsFlipped ? DisplaySenteCaptured : DisplayGoteCaptured)"
         Player="@(IsFlipped ? Player.Sente : Player.Gote)"
@@ -61,10 +136,10 @@
                     </div>
                 }
 
-                @* 候補手の矢印オーバーレイ *@
+                @* 候補手の矢印オーバーレイ（通常移動のみ） *@
                 @if (CandidateMoves?.Count > 0)
                 {
-                    var arrows = GetCandidateArrows().ToList();
+                    var arrows = GetMoveArrows().ToList();
                     <svg class="candidate-arrows-overlay" viewBox="0 0 450 450" preserveAspectRatio="none">
                         @foreach (var arrow in arrows)
                         {
@@ -72,61 +147,9 @@
                             var x2 = arrow.ToCol * 50 + 25;
                             var y2 = arrow.ToRow * 50 + 25;
 
-                            @if (arrow.IsDrop)
-                            {
-                                @* 駒打ちは持ち駒パネル側から矢印を引く *@
-                                @* 手番と盤面反転状態から始点を決定 *@
-                                var isPlayerCaptured = (CandidateMovePlayer == Player.Sente && !IsFlipped) ||
-                                                       (CandidateMovePlayer == Player.Gote && IsFlipped);
-                                var x1 = (double)x2;
-                                var y1 = isPlayerCaptured ? 450.0 : 0.0;
-
-                                var dx = x2 - x1;
-                                var dy = y2 - y1;
-                                var length = Math.Sqrt(dx * dx + dy * dy);
-                                if (length > 0)
-                                {
-                                    @* 矢印を少し短くして駒と重ならないようにする *@
-                                    var shortenRatio = 15 / length;
-                                    var adjX2 = x2 - dx * shortenRatio;
-                                    var adjY2 = y2 - dy * shortenRatio;
-
-                                    @* 矢印の鏃を計算 *@
-                                    var arrowHeadLength = arrow.StrokeWidth * 2.5;
-                                    var arrowHeadWidth = arrow.StrokeWidth * 1.5;
-                                    var unitX = dx / length;
-                                    var unitY = dy / length;
-                                    var perpX = -unitY;
-                                    var perpY = unitX;
-
-                                    @* 鏃の付け根 *@
-                                    var baseX = adjX2 - unitX * arrowHeadLength;
-                                    var baseY = adjY2 - unitY * arrowHeadLength;
-
-                                    @* 鏃の左右の点 *@
-                                    var leftX = baseX + perpX * arrowHeadWidth;
-                                    var leftY = baseY + perpY * arrowHeadWidth;
-                                    var rightX = baseX - perpX * arrowHeadWidth;
-                                    var rightY = baseY - perpY * arrowHeadWidth;
-
-                                    @* 矢印の本体（線） *@
-                                    <line x1="@x1.ToString("F1")" y1="@y1.ToString("F1")"
-                                          x2="@baseX.ToString("F1")" y2="@baseY.ToString("F1")"
-                                          stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
-                                          stroke-linecap="round"
-                                          opacity="0.7" />
-
-                                    @* 矢印の鏃（path） *@
-                                    <path d="M @adjX2.ToString("F1") @adjY2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
-                                          fill="#2266cc"
-                                          opacity="0.7" />
-                                }
-                            }
-                            else
-                            {
-                                @* 通常の移動は矢印で表示 *@
-                                var x1 = arrow.FromCol * 50 + 25;
-                                var y1 = arrow.FromRow * 50 + 25;
+                            @* 通常の移動は矢印で表示 *@
+                            var x1 = arrow.FromCol * 50 + 25;
+                            var y1 = arrow.FromRow * 50 + 25;
 
                                 var dx = x2 - x1;
                                 var dy = y2 - y1;
@@ -170,7 +193,6 @@
                                           fill="#2266cc"
                                           opacity="0.7" />
                                 }
-                            }
                         }
                     </svg>
                 }

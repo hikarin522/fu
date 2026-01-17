@@ -237,14 +237,13 @@ public partial class ShogiBoard
         return lastMove.To == pos || (lastMove.From is { } from && from == pos);
     }
 
-    /// <summary>候補手の矢印データを取得</summary>
-    private IEnumerable<ArrowData> GetCandidateArrows()
+    /// <summary>候補手の矢印データを取得（通常移動のみ）</summary>
+    private IEnumerable<ArrowData> GetMoveArrows()
     {
         if (this.CandidateMoves is not { Count: > 0 }) {
             yield break;
         }
 
-        // 太さで順位を表現: 1位=6, 2位=4, 3位=2
         var strokeWidths = new[] { 6, 4, 2 };
 
         foreach (var candidate in this.CandidateMoves.Take(3)) {
@@ -253,18 +252,67 @@ public partial class ShogiBoard
             }
             var (from, to, dropPiece) = move;
 
-            var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
-            var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
-
             if (from is { } f) {
+                var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
+                var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
                 var fromDisplay = this.IsFlipped ? (8 - f.col, 8 - f.row) : (f.col, f.row);
                 yield return new ArrowData(fromDisplay.Item1, fromDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, null);
             }
-            else if (dropPiece is { } piece) {
-                // 駒打ちの場合、駒種類を渡す
+        }
+    }
+
+    /// <summary>駒打ちの矢印データを取得</summary>
+    private IEnumerable<ArrowData> GetDropArrows()
+    {
+        if (this.CandidateMoves is not { Count: > 0 }) {
+            yield break;
+        }
+
+        var strokeWidths = new[] { 6, 4, 2 };
+
+        foreach (var candidate in this.CandidateMoves.Take(3)) {
+            if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) {
+                continue;
+            }
+            var (from, to, dropPiece) = move;
+
+            if (dropPiece is { } piece) {
+                var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
+                var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
                 yield return new ArrowData(0, 0, toDisplay.Item1, toDisplay.Item2, strokeWidth, piece);
             }
         }
+    }
+
+    /// <summary>持ち駒パネル内の駒の表示インデックスを取得</summary>
+    private static int GetCapturedPieceIndex(CapturedPieces pieces, char sfenPiece)
+    {
+        var pieceOrder = new[] { PieceType.Rook, PieceType.Bishop, PieceType.Gold, PieceType.Silver, PieceType.Knight, PieceType.Lance, PieceType.Pawn };
+        var targetType = sfenPiece switch {
+            'R' => PieceType.Rook,
+            'B' => PieceType.Bishop,
+            'G' => PieceType.Gold,
+            'S' => PieceType.Silver,
+            'N' => PieceType.Knight,
+            'L' => PieceType.Lance,
+            'P' => PieceType.Pawn,
+            _ => (PieceType?)null
+        };
+
+        if (targetType is null) {
+            return -1;
+        }
+
+        var index = 0;
+        foreach (var pieceType in pieceOrder) {
+            if (pieces.GetCount(pieceType) > 0) {
+                if (pieceType == targetType) {
+                    return index;
+                }
+                index++;
+            }
+        }
+        return -1;
     }
 
     /// <summary>駒打ちの駒種類（SFEN形式の大文字: P, L, N, S, G, B, R）、駒打ちでない場合はnull</summary>
