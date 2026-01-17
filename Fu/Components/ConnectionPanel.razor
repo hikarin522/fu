@@ -1,0 +1,113 @@
+<div class="connection-panel">
+    <h3>ルーム接続</h3>
+
+    <div class="connection-status">
+        状態: <span class="status-@ConnectionState.ToString().ToLower()">@GetStatusText()</span>
+    </div>
+
+    @if (ConnectionState == Services.ConnectionState.Disconnected)
+    {
+        @if (string.IsNullOrEmpty(Nickname))
+        {
+            <div class="nickname-section">
+                <h4>ニックネームを入力してください</h4>
+                <div class="nickname-input">
+                    <input type="text" @bind="InputNickname" @bind:event="oninput"
+                           placeholder="ニックネーム" maxlength="20" />
+                </div>
+                <div class="connection-buttons">
+                    <button class="btn primary large" @onclick="CreateRoomWithNickname"
+                            disabled="@(InputNickname.Length < 1 || IsProcessing)">
+                        @(IsProcessing ? "作成中..." : "ルームを作成")
+                        <span class="hint">ホストとして参加</span>
+                    </button>
+                    <button class="btn secondary large" @onclick="ShowJoinForm"
+                            disabled="@(InputNickname.Length < 1)">
+                        ルームに参加
+                        <span class="hint">コードを入力して参加</span>
+                    </button>
+                </div>
+            </div>
+        }
+        else if (IsJoiningRoom)
+        {
+            <div class="connection-options">
+                <div class="option-section">
+                    <h4>ルームに参加（@Nickname）</h4>
+                    <button class="btn secondary small" @onclick="ResetAll">← 戻る</button>
+
+                    <div class="room-code-section">
+                        <label>ルームコードを入力：</label>
+                        <div class="room-code-input">
+                            <input type="text" @bind="InputRoomId" @bind:event="oninput"
+                                   placeholder="例: ABC123" maxlength="6"
+                                   style="text-transform: uppercase;" />
+                            <button class="btn primary" @onclick="JoinRoom"
+                                    disabled="@(InputRoomId.Length < 6 || IsProcessing)">
+                                @(IsProcessing ? "接続中..." : "参加")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+
+    @if (ConnectionState == Services.ConnectionState.Connecting && WebRtcService.IsHost)
+    {
+        <div class="connecting">
+            <div class="room-url-section">
+                <label>招待URL：</label>
+                <div class="room-url-display">
+                    <input type="text" readonly value="@RoomUrl" class="room-url-input" />
+                    <button class="btn small" @onclick="() => CopyToClipboard(RoomUrl)">コピー</button>
+                </div>
+                <p class="hint">このURLを共有してください</p>
+            </div>
+            <div class="spinner"></div>
+            <p>参加者を待っています...</p>
+        </div>
+    }
+    else if (ConnectionState == Services.ConnectionState.Connecting && !WebRtcService.IsHost)
+    {
+        <div class="connecting">
+            <div class="spinner"></div>
+            <p>接続中...</p>
+        </div>
+    }
+
+    @if (ConnectionState == Services.ConnectionState.Connected || WebRtcService.Participants.Count > 0)
+    {
+        <div class="room-info">
+            @if (!string.IsNullOrEmpty(RoomUrl))
+            {
+                <div class="room-url-section compact">
+                    <label>招待URL：</label>
+                    <input type="text" readonly value="@RoomUrl" class="room-url-input small" />
+                    <button class="btn small" @onclick="() => CopyToClipboard(RoomUrl)">コピー</button>
+                </div>
+            }
+
+            <div class="participants-section">
+                <h4>参加者 (@WebRtcService.Participants.Count)</h4>
+                <ul class="participants-list">
+                    @foreach (var p in WebRtcService.Participants)
+                    {
+                        <li class="@(p.PeerId == WebRtcService.MyPeerId ? "me" : "")">
+                            @p.Nickname
+                            @if (p.IsHost) { <span class="badge host">ホスト</span> }
+                            @if (p.PeerId == WebRtcService.MyPeerId) { <span class="badge me">(自分)</span> }
+                        </li>
+                    }
+                </ul>
+            </div>
+
+            <button class="btn danger" @onclick="Disconnect">切断</button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="error-message">@ErrorMessage</div>
+    }
+</div>

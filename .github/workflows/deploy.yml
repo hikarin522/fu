@@ -27,13 +27,13 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore dependencies
-        run: dotnet restore ShogiGame.csproj
+        run: dotnet restore Fu/Fu.csproj
 
       - name: Build
-        run: dotnet build ShogiGame.csproj -c Release --no-restore
+        run: dotnet build Fu/Fu.csproj -c Release --no-restore
 
       - name: Publish
-        run: dotnet publish ShogiGame.csproj -c Release -o publish --no-build
+        run: dotnet publish Fu/Fu.csproj -c Release -o publish --no-build
 
       - name: Change base href
         run: sed -i 's|<base href="/" />|<base href="/fu/" />|g' publish/wwwroot/index.html

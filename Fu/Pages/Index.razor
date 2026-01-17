@@ -1,0 +1,147 @@
+@page "/"
+@page "/{RoomIdParam?}"
+
+<div class="game-page">
+    <header class="game-header">
+        <h1>Fu - 将棋</h1>
+        <div class="game-info">
+            @switch (GameService.State.Status)
+            {
+                case GameStatus.Playing:
+                    <span class="turn-indicator @(GameService.State.IsMyTurn ? "my-turn" : "opponent-turn")">
+                        @(GameService.State.IsMyTurn ? "あなたの番です" : "相手の番です")
+                    </span>
+                    @if (GameService.IsInCheck())
+                    {
+                        <span class="check-indicator">王手!</span>
+                    }
+                    break;
+                case var status when status.GetResultMessage() is { } message:
+                    <span class="game-result">@message</span>
+                    break;
+            }
+        </div>
+    </header>
+
+    <main class="game-main">
+        @if (!string.IsNullOrEmpty(InitError))
+        {
+            <div class="error-message">初期化エラー: @InitError</div>
+        }
+        else if (!WebRtcService.IsConnected)
+        {
+            <ConnectionPanel
+                WebRtcService="WebRtcService"
+                OnConnected="OnConnected"
+                InitialRoomId="@RoomIdParam"
+                BaseUrl="@BaseUrl" />
+        }
+        else if (ShowNewGameDialog)
+        {
+            <div class="new-game-dialog">
+                <h3>新規対局</h3>
+                <p>対局者を選択してください</p>
+
+                <div class="player-select-section">
+                    <label>先手:</label>
+                    <select @bind="SelectedSentePeerId">
+                        <option value="">-- 選択 --</option>
+                        @foreach (var p in WebRtcService.Participants)
+                        {
+                            <option value="@p.PeerId">@p.Nickname @(p.PeerId == WebRtcService.MyPeerId ? "(自分)" : "")</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="player-select-section">
+                    <label>後手:</label>
+                    <select @bind="SelectedGotePeerId">
+                        <option value="">-- 選択 --</option>
+                        @foreach (var p in WebRtcService.Participants)
+                        {
+                            <option value="@p.PeerId">@p.Nickname @(p.PeerId == WebRtcService.MyPeerId ? "(自分)" : "")</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="dialog-buttons">
+                    <button class="btn primary" @onclick="StartNewGameAsync"
+                            disabled="@(string.IsNullOrEmpty(SelectedSentePeerId) || string.IsNullOrEmpty(SelectedGotePeerId) || SelectedSentePeerId == SelectedGotePeerId)">
+                        対局開始
+                    </button>
+                    <button class="btn" @onclick="() => ShowNewGameDialog = false">キャンセル</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="game-area">
+                <div class="player-info opponent">
+                    <span class="player-label">
+                        @(IsFlipped ? SenteNickname : GoteNickname)
+                        (@(IsFlipped ? "先手" : "後手"))
+                    </span>
+                </div>
+
+                <ShogiBoard
+                    State="GameService.State"
+                    GameService="GameService"
+                    OnMoveMade="OnMoveMade"
+                    IsFlipped="IsFlipped" />
+
+                <div class="player-info self">
+                    <span class="player-label">
+                        @(IsFlipped ? GoteNickname : SenteNickname)
+                        (@(IsFlipped ? "後手" : "先手"))
+                        @if (IsPlayer)
+                        {
+                            <span>(あなた)</span>
+                        }
+                    </span>
+                </div>
+
+                @if (IsSpectator)
+                {
+                    <div class="spectator-notice">観戦中</div>
+                }
+
+                <div class="game-controls">
+                    @if (GameService.State.Status == GameStatus.Playing && IsPlayer)
+                    {
+                        <button class="btn danger" @onclick="ResignAsync">投了</button>
+                    }
+                    <button class="btn" @onclick="OpenNewGameDialog">新規対局</button>
+                </div>
+            </div>
+        }
+    </main>
+
+    <div class="move-history">
+        <div class="move-history-header">
+            <h4>棋譜</h4>
+            @if (GameService.State.MoveHistory.Count > 0)
+            {
+                <button class="btn-small" @onclick="DownloadKifAsync">保存</button>
+            }
+        </div>
+        <div class="history-navigation">
+            <button class="btn-nav" @onclick="GoBackAsync" disabled="@(GameService.State.DisplayMoveIndex == 0)">&lt;</button>
+            <span class="move-index">@GameService.State.DisplayMoveIndex / @GameService.State.MoveHistory.Count</span>
+            <button class="btn-nav" @onclick="GoForwardAsync" disabled="@(!GameService.State.IsReviewing)">&gt;</button>
+        </div>
+        @if (GameService.State.IsReviewing)
+        {
+            <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
+            <div class="branch-indicator">分岐から再開可能</div>
+        }
+        <div class="history-list">
+            @for (int i = 0; i < GameService.State.MoveHistory.Count; i++)
+            {
+                var move = GameService.State.MoveHistory[i];
+                var index = i;
+                var isViewing = GameService.State.DisplayMoveIndex == i + 1;
+                <span class="move-entry @(isViewing ? "viewing" : "")" @onclick="() => GoToMoveAsync(index + 1)">@((i + 1)). @move.ToNotation()</span>
+            }
+        </div>
+    </div>
+</div>

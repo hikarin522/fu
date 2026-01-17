@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Fu.Core/Fu.Core.csproj" />
+  <Project Path="Fu/Fu.csproj" />
+</Solution>
