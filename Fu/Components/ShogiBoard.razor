@@ -10,8 +10,8 @@
         <div class="col-labels top">
             @for (int c = 0; c < 9; c++)
             {
-                var col = IsFlipped ? c : 8 - c;
-                <span>@(col + 1)</span>
+                var col = IsFlipped ? 8 - c : c;
+                <span>@(9 - col)</span>
             }
         </div>
 
@@ -34,7 +34,7 @@
                     <div class="board-row">
                         @for (int c = 0; c < 9; c++)
                         {
-                            var displayCol = IsFlipped ? c : 8 - c;
+                            var displayCol = IsFlipped ? 8 - c : c;
                             var pos = new Position(displayCol, displayRow);
                             var piece = DisplayBoard[pos];
                             var isSelected = SelectedPosition == pos;
