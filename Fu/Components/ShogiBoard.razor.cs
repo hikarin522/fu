@@ -45,8 +45,10 @@ public partial class ShogiBoard
     private Player DisplayCurrentPlayer => this.DisplayState.currentPlayer;
 
     // 閲覧モードでは表示中の盤面の手番で判定（分岐から再開できる）
+    // 検討モードでは手番関係なく自由に動かせる
     private bool CanInteract =>
-        this.State.Status == GameStatus.Playing && this.DisplayCurrentPlayer == this.State.LocalPlayer;
+        this.State.Status == GameStatus.Reviewing ||
+        (this.State.Status == GameStatus.Playing && this.DisplayCurrentPlayer == this.State.LocalPlayer);
 
     private async Task OnCellClickAsync(Position pos)
     {

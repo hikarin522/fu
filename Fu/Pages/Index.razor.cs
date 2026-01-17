@@ -203,6 +203,43 @@ public partial class Index : IAsyncDisposable
         }
     }
 
+    private async Task SaveGameSessionAsync()
+    {
+        try {
+            var nickname = await this.JS.InvokeAsync<string>("NicknameStorage.load");
+            await this.JS.InvokeVoidAsync("GameSession.save", this.WebRtcService.RoomId?.AsPrimitive(), nickname);
+        }
+        catch {
+            // 保存失敗は無視
+        }
+    }
+
+    private async Task<(string? roomId, string? nickname)> LoadGameSessionAsync()
+    {
+        try {
+            var session = await this.JS.InvokeAsync<GameSessionData?>("GameSession.load");
+            if (session is not null) {
+                return (session.RoomId, session.Nickname);
+            }
+        }
+        catch {
+            // 読み込み失敗は無視
+        }
+        return (null, null);
+    }
+
+    private async Task ClearGameSessionAsync()
+    {
+        try {
+            await this.JS.InvokeVoidAsync("GameSession.clear");
+        }
+        catch {
+            // クリア失敗は無視
+        }
+    }
+
+    private sealed record GameSessionData(string RoomId, string Nickname, long Timestamp);
+
     private async ValueTask OnGameStateChangedAsync()
     {
         await this.InvokeAsync(this.StateHasChanged);
@@ -273,6 +310,11 @@ public partial class Index : IAsyncDisposable
         await this.GameService.SetLocalPlayerAsync(localPlayer);
         await this.GameService.NewGameAsync();
 
+        // 対局者の場合、セッション情報を保存（リロード時の再接続用）
+        if (localPlayer != Player.None && this.WebRtcService.RoomId is not null) {
+            await this.SaveGameSessionAsync();
+        }
+
         // 自分が先手（最初の手番）なら通知音を鳴らす
         if (localPlayer == Player.Sente) {
             await this.PlayTurnNotificationAsync();
@@ -286,11 +328,13 @@ public partial class Index : IAsyncDisposable
     {
         await this.GameService.ResignAsync();
         await this.WebRtcService.SendResignAsync();
+        await this.ClearGameSessionAsync();
     }
 
     private async Task OnRemoteResignReceivedAsync()
     {
         await this.GameService.ResignAsync();
+        await this.ClearGameSessionAsync();
         await this.InvokeAsync(this.StateHasChanged);
     }
 
@@ -329,6 +373,15 @@ public partial class Index : IAsyncDisposable
 
             // ゲーム状態を復元
             await this.GameService.RestoreStateAsync(info.MoveHistory, info.Status);
+
+            // 対局者かつ対局中ならセッション保存、終了していればクリア
+            if (localPlayer != Player.None) {
+                if (info.Status == GameStatus.Playing) {
+                    await this.SaveGameSessionAsync();
+                } else if (info.Status.IsGameOver()) {
+                    await this.ClearGameSessionAsync();
+                }
+            }
 
             this.ShowNewGameDialog = false;
             this.StateHasChanged();

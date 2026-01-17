@@ -309,6 +309,51 @@ window.TurnNotification = {
 // Sound settings storage
 const SOUND_SETTINGS_KEY = 'fu_sound_enabled';
 
+// Game session storage (for reconnection)
+const GAME_SESSION_KEY = 'fu_game_session';
+
+window.GameSession = {
+    save: function (roomId, nickname) {
+        try {
+            const session = {
+                roomId: roomId,
+                nickname: nickname,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(GAME_SESSION_KEY, JSON.stringify(session));
+        } catch (e) {
+            console.warn('Failed to save game session to localStorage:', e);
+        }
+    },
+
+    load: function () {
+        try {
+            const data = localStorage.getItem(GAME_SESSION_KEY);
+            if (!data) return null;
+
+            const session = JSON.parse(data);
+            // セッションが24時間以上古い場合は無効とみなす
+            const maxAge = 24 * 60 * 60 * 1000;
+            if (Date.now() - session.timestamp > maxAge) {
+                localStorage.removeItem(GAME_SESSION_KEY);
+                return null;
+            }
+            return session;
+        } catch (e) {
+            console.warn('Failed to load game session from localStorage:', e);
+            return null;
+        }
+    },
+
+    clear: function () {
+        try {
+            localStorage.removeItem(GAME_SESSION_KEY);
+        } catch (e) {
+            console.warn('Failed to clear game session from localStorage:', e);
+        }
+    }
+};
+
 window.SoundSettings = {
     save: function (value) {
         try {

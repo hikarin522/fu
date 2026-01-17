@@ -10,15 +10,13 @@
         {
             <div class="tree-row">
                 <svg class="tree-graph" width="@graphWidth" height="@RowHeight">
-                    @* 各列の縦線と分岐を描画 *@
                     @foreach (var col in row.Columns)
                     {
-                        var x = col.ColumnIndex * ColumnWidth + ColumnWidth / 2;
+                        var x = col.Column * ColumnWidth + ColumnWidth / 2;
                         var cy = RowHeight / 2;
 
                         @if (col.HasNode)
                         {
-                            @* ノードがある列 *@
                             @if (col.LineFromTop)
                             {
                                 <line x1="@x" y1="0" x2="@x" y2="@cy" stroke="@col.Color" stroke-width="2" />
@@ -28,37 +26,28 @@
                                 <line x1="@x" y1="@cy" x2="@x" y2="@RowHeight" stroke="@col.Color" stroke-width="2" />
                             }
                             <circle cx="@x" cy="@cy" r="5"
-                                    fill="@(col.IsCurrentNode ? "#0078d4" : "#1e1e1e")"
-                                    stroke="@(col.IsCurrentNode ? "#0078d4" : col.Color)"
+                                    fill="@(col.IsCurrent ? HighlightColor : BackgroundColor)"
+                                    stroke="@(col.IsCurrent ? HighlightColor : col.Color)"
                                     stroke-width="2" />
                         }
                         else if (col.PassThrough)
                         {
-                            @* 通過する縦線のみ *@
                             <line x1="@x" y1="0" x2="@x" y2="@RowHeight" stroke="@col.Color" stroke-width="2" />
                         }
 
-                        @* この位置から分岐する線 *@
-                        @foreach (var branch in col.BranchesToDraw)
+                        @foreach (var branch in col.ChildBranches)
                         {
-                            var targetX = branch.TargetColumn * ColumnWidth + ColumnWidth / 2;
+                            var targetX = branch.Column * ColumnWidth + ColumnWidth / 2;
                             <path d="M @x @cy Q @x @(cy + 8), @(x + 8) @(cy + 8) L @(targetX - 8) @(cy + 8) Q @targetX @(cy + 8), @targetX @RowHeight"
                                   stroke="@branch.Color" stroke-width="2" fill="none" />
                         }
                     }
                 </svg>
 
-                <div class="tree-node @(row.IsCurrentNode ? "current" : "")"
-                     @onclick="() => OnNodeClick(row.Node)"
+                <div class="tree-node @(row.IsCurrent ? "current" : "")"
+                     @onclick="() => OnNodeSelected.InvokeAsync(row.Node)"
                      title="@(row.Node?.Move.ToNotationWithFrom() ?? "")">
-                    @if (row.IsStart)
-                    {
-                        <span>開始局面</span>
-                    }
-                    else if (row.Node is not null)
-                    {
-                        <span>@(row.Node.Depth). @row.Node.Move.ToNotationWithFrom()</span>
-                    }
+                    <span>@row.Label</span>
                 </div>
             </div>
         }
@@ -73,12 +62,109 @@
 
     private const int ColumnWidth = 20;
     private const int RowHeight = 24;
+    private const string HighlightColor = "#0078d4";
+    private const string BackgroundColor = "#1e1e1e";
 
-    private static readonly string[] BranchColors = [
-        "#4ec9b0", "#ce9178", "#dcdcaa", "#c586c0", "#9cdcfe", "#d16969"
-    ];
+    private static readonly string[] BranchColors = ["#4ec9b0", "#ce9178", "#dcdcaa", "#c586c0", "#9cdcfe", "#d16969"];
 
-    private async Task OnNodeClick(MoveNode? node) => await OnNodeSelected.InvokeAsync(node);
+    private TreeData BuildTreeData()
+    {
+        if (MoveTree is null) return new([], 0);
+
+        var branches = CollectAllBranches();
+        var rows = BuildRows(branches);
+        var maxColumn = branches.Count > 0 ? branches.Max(b => b.Column) : 0;
+
+        return new(rows, maxColumn);
+    }
+
+    private List<Branch> CollectAllBranches()
+    {
+        var branches = new List<Branch>();
+        var mainBranch = new Branch(0, null, null, BranchColors[0]);
+        branches.Add(mainBranch);
+
+        mainBranch.Nodes.Add(new(null, 0));
+
+        var rowIndex = 1;
+        CollectBranchNodes(MoveTree!.RootChildren, mainBranch, branches, ref rowIndex, 1);
+
+        return branches;
+    }
+
+    private void CollectBranchNodes(IReadOnlyList<MoveNode> nodes, Branch currentBranch, List<Branch> allBranches, ref int rowIndex, int nextColumn)
+    {
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            var node = nodes[i];
+
+            if (i == 0)
+            {
+                currentBranch.Nodes.Add(new(node, rowIndex++));
+                CollectBranchNodes(node.Children, currentBranch, allBranches, ref rowIndex, nextColumn);
+            }
+            else
+            {
+                var parentRow = currentBranch.Nodes[^1].Row;
+                var color = BranchColors[allBranches.Count % BranchColors.Length];
+                var newBranch = new Branch(nextColumn, currentBranch, parentRow, color);
+                allBranches.Add(newBranch);
+
+                newBranch.Nodes.Add(new(node, rowIndex++));
+                CollectBranchNodes(node.Children, newBranch, allBranches, ref rowIndex, nextColumn + 1);
+            }
+        }
+    }
+
+    private List<RowData> BuildRows(List<Branch> branches)
+    {
+        var allNodes = branches
+            .SelectMany(b => b.Nodes.Select(n => (n.Node, n.Row, Branch: b)))
+            .OrderBy(x => x.Row)
+            .ToList();
+
+        return allNodes.Select(x => BuildRow(x.Node, x.Row, x.Branch, branches)).ToList();
+    }
+
+    private RowData BuildRow(MoveNode? node, int row, Branch nodeBranch, List<Branch> branches)
+    {
+        var isCurrent = IsCurrentNode(node);
+        var columns = branches
+            .Select(b => BuildColumnData(b, row, nodeBranch, branches))
+            .Where(c => c is not null)
+            .Cast<ColumnData>()
+            .OrderBy(c => c.Column)
+            .ToList();
+
+        var label = node is null ? "開始局面" : $"{node.Depth}. {node.Move.ToNotationWithFrom()}";
+        return new(node, isCurrent, label, columns);
+    }
+
+    private ColumnData? BuildColumnData(Branch branch, int row, Branch nodeBranch, List<Branch> branches)
+    {
+        var (firstRow, lastRow) = (branch.Nodes[0].Row, branch.Nodes[^1].Row);
+        var isActive = row >= firstRow && row <= lastRow;
+        var hasNode = branch == nodeBranch && branch.Nodes.Any(n => n.Row == row);
+
+        if (!isActive && !hasNode) return null;
+
+        var childBranches = hasNode
+            ? branches.Where(b => b.Parent == branch && b.BranchPointRow == row)
+                      .Select(b => new ChildBranchData(b.Column, b.Color))
+                      .ToList()
+            : [];
+
+        return new(
+            branch.Column,
+            branch.Color,
+            hasNode,
+            hasNode && IsCurrentNode(branch.Nodes.First(n => n.Row == row).Node),
+            hasNode && row > firstRow,
+            hasNode && row < lastRow,
+            isActive && !hasNode,
+            childBranches
+        );
+    }
 
     private bool IsCurrentNode(MoveNode? node)
     {
@@ -86,154 +172,21 @@
         if (MoveHistory is null || node.Depth != DisplayMoveIndex) return false;
 
         var nodePath = node.GetMoves();
-        for (int i = 0; i < nodePath.Count && i < MoveHistory.Count; i++)
-        {
-            if (!MoveNode.IsSameMove(nodePath[i], MoveHistory[i])) return false;
-        }
-        return true;
+        return !nodePath.Where((move, i) => i < MoveHistory.Count && !MoveNode.IsSameMove(move, MoveHistory[i])).Any();
     }
 
-    private record BranchLine(int TargetColumn, string Color);
-    private record ColumnData(int ColumnIndex, string Color, bool HasNode, bool IsCurrentNode, bool LineFromTop, bool LineToBottom, bool PassThrough, List<BranchLine> BranchesToDraw);
-    private record RowData(MoveNode? Node, bool IsStart, bool IsCurrentNode, List<ColumnData> Columns);
+    private record ChildBranchData(int Column, string Color);
+    private record ColumnData(int Column, string Color, bool HasNode, bool IsCurrent, bool LineFromTop, bool LineToBottom, bool PassThrough, List<ChildBranchData> ChildBranches);
+    private record RowData(MoveNode? Node, bool IsCurrent, string Label, List<ColumnData> Columns);
     private record TreeData(List<RowData> Rows, int MaxColumn);
+    private record NodeData(MoveNode? Node, int Row);
 
-    private TreeData BuildTreeData()
+    private class Branch(int column, Branch? parent, int? branchPointRow, string color)
     {
-        if (MoveTree is null) return new TreeData([], 0);
-
-        // ブランチを収集
-        var branches = new List<BranchInfo>();
-        var mainBranch = new BranchInfo(0, null, 0, BranchColors[0]);
-        branches.Add(mainBranch);
-
-        // 開始局面を追加
-        mainBranch.Nodes.Add((null, 0)); // (node, rowIndex)
-
-        // メインラインを収集
-        int rowIndex = 1;
-        CollectBranch(MoveTree.RootChildren, mainBranch, branches, ref rowIndex, 1);
-
-        // 行データを構築
-        var allNodes = new List<(MoveNode? Node, int RowIndex, BranchInfo Branch)>();
-        foreach (var branch in branches)
-        {
-            foreach (var (node, ri) in branch.Nodes)
-            {
-                allNodes.Add((node, ri, branch));
-            }
-        }
-
-        // 行インデックスでソート
-        allNodes = allNodes.OrderBy(x => x.RowIndex).ToList();
-
-        var rows = new List<RowData>();
-        int maxColumn = branches.Max(b => b.Column);
-
-        foreach (var (node, ri, nodeBranch) in allNodes)
-        {
-            var isStart = node is null;
-            var isCurrentNode = IsCurrentNode(node);
-            var columns = new List<ColumnData>();
-
-            // 各ブランチについて、この行での状態を計算
-            foreach (var branch in branches)
-            {
-                var nodeInBranch = branch.Nodes.FirstOrDefault(n => n.RowIndex == ri);
-                var hasNode = nodeInBranch != default && branch == nodeBranch;
-
-                // ブランチがこの行でアクティブか
-                var branchFirstRow = branch.Nodes.Min(n => n.RowIndex);
-                var branchLastRow = branch.Nodes.Max(n => n.RowIndex);
-                var isActive = ri >= branchFirstRow && ri <= branchLastRow;
-
-                if (!isActive && !hasNode) continue;
-
-                var passThrough = isActive && !hasNode;
-                var lineFromTop = hasNode && ri > branchFirstRow;
-                var lineToBottom = hasNode && ri < branchLastRow;
-
-                // この行から分岐する子ブランチを検索
-                var branchesToDraw = new List<BranchLine>();
-                if (hasNode)
-                {
-                    foreach (var childBranch in branches)
-                    {
-                        if (childBranch.ParentBranch == branch && childBranch.BranchPointRow == ri)
-                        {
-                            branchesToDraw.Add(new BranchLine(childBranch.Column, childBranch.Color));
-                        }
-                    }
-                }
-
-                columns.Add(new ColumnData(
-                    branch.Column,
-                    branch.Color,
-                    hasNode,
-                    hasNode && isCurrentNode,
-                    lineFromTop,
-                    lineToBottom,
-                    passThrough,
-                    branchesToDraw
-                ));
-            }
-
-            // 列をソート
-            columns = columns.OrderBy(c => c.ColumnIndex).ToList();
-
-            rows.Add(new RowData(node, isStart, isCurrentNode, columns));
-        }
-
-        return new TreeData(rows, maxColumn);
-    }
-
-    private class BranchInfo
-    {
-        public int Column { get; }
-        public BranchInfo? ParentBranch { get; }
-        public int? BranchPointRow { get; }
-        public string Color { get; }
-        public List<(MoveNode? Node, int RowIndex)> Nodes { get; } = [];
-
-        public BranchInfo(int column, BranchInfo? parentBranch, int? branchPointRow, string color)
-        {
-            Column = column;
-            ParentBranch = parentBranch;
-            BranchPointRow = branchPointRow;
-            Color = color;
-        }
-    }
-
-    private void CollectBranch(IReadOnlyList<MoveNode> nodes, BranchInfo currentBranch, List<BranchInfo> allBranches, ref int rowIndex, int nextColumn)
-    {
-        for (int i = 0; i < nodes.Count; i++)
-        {
-            var node = nodes[i];
-
-            if (i == 0)
-            {
-                // メインライン: 現在のブランチに追加
-                currentBranch.Nodes.Add((node, rowIndex));
-                var currentRow = rowIndex;
-                rowIndex++;
-
-                // 子ノードを処理
-                CollectBranch(node.Children, currentBranch, allBranches, ref rowIndex, nextColumn);
-            }
-            else
-            {
-                // 分岐: 新しいブランチを作成
-                var parentRow = currentBranch.Nodes.Last().RowIndex;
-                var color = BranchColors[allBranches.Count % BranchColors.Length];
-                var newBranch = new BranchInfo(nextColumn, currentBranch, parentRow, color);
-                allBranches.Add(newBranch);
-
-                newBranch.Nodes.Add((node, rowIndex));
-                rowIndex++;
-
-                // 子ノードを処理
-                CollectBranch(node.Children, newBranch, allBranches, ref rowIndex, nextColumn + 1);
-            }
-        }
+        public int Column { get; } = column;
+        public Branch? Parent { get; } = parent;
+        public int? BranchPointRow { get; } = branchPointRow;
+        public string Color { get; } = color;
+        public List<NodeData> Nodes { get; } = [];
     }
 }

@@ -52,19 +52,18 @@ public partial class ConnectionPanel : IDisposable
                 this.InputNickname = savedNickname;
             }
 
-            // sessionStorage から再接続用のルームIDを確認
-            var reconnectRoomId = await this.JS.InvokeAsync<string>("eval", @"
-                (function() {
-                    const roomId = sessionStorage.getItem('reconnect-room-id');
-                    sessionStorage.removeItem('reconnect-room-id');
-                    return roomId || '';
-                })()
-            ");
+            // GameSession から再接続情報を確認（招待リンクと一致する場合のみ自動再接続）
+            var session = await this.JS.InvokeAsync<GameSessionData?>("GameSession.load");
+            var shouldAutoReconnect = session is not null
+                && !string.IsNullOrEmpty(session.Nickname)
+                && this.HasInitialRoomId
+                && string.Equals(session.RoomId, this.InitialRoomId, StringComparison.OrdinalIgnoreCase);
 
-            if (!string.IsNullOrEmpty(reconnectRoomId) && !string.IsNullOrEmpty(savedNickname)) {
-                // 自動再接続
-                this.InputRoomId = reconnectRoomId;
-                this.Nickname = savedNickname;
+            if (shouldAutoReconnect) {
+                // 自動再接続（招待リンクのroomIdとセッションのroomIdが一致）
+                this.InputRoomId = session!.RoomId;
+                this.Nickname = session.Nickname;
+                this.InputNickname = session.Nickname;
                 this.StateHasChanged();
                 await this.JoinRoom();
             }
@@ -73,6 +72,8 @@ public partial class ConnectionPanel : IDisposable
             }
         }
     }
+
+    private sealed record GameSessionData(string RoomId, string Nickname, long Timestamp);
 
     private async Task OnStateChangedAsync(ConnectionState state)
     {
