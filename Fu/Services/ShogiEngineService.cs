@@ -49,14 +49,20 @@ public class ShogiEngineService : IAsyncDisposable
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
 
-    /// <summary>詰み手数（正:先手勝ち、負:後手勝ち、null:詰みなし）</summary>
+    /// <summary>詰み手数（正:手番側勝ち、負:手番側負け）</summary>
     public int? MateIn { get; private set; }
+
+    /// <summary>詰みを見つけた時の手番</summary>
+    public Player MatePlayer { get; private set; }
 
     /// <summary>詰めろ状態（相手が受けなければ次に詰む）</summary>
     public bool IsThreatening { get; private set; }
 
     /// <summary>詰めろの詰み手数</summary>
     public int? ThreateningMateIn { get; private set; }
+
+    /// <summary>詰めろがかかっている側</summary>
+    public Player ThreateningPlayer { get; private set; }
 
     /// <summary>最善手</summary>
     public string? BestMove { get; private set; }
@@ -311,11 +317,12 @@ public class ShogiEngineService : IAsyncDisposable
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
 
-        // 相手番で詰みが見つかった場合、詰めろ
+        // 相手番で詰みが見つかった場合、元の手番側に詰めろがかかっている
         if (info.MateIn.HasValue && info.MateIn.Value > 0) {
-            // 相手から見て詰みがある = 自分が詰めろをかけている
             this.IsThreatening = true;
             this.ThreateningMateIn = info.MateIn.Value;
+            // 元の手番側に詰めろがかかっている（相手番で詰ませるので）
+            this.ThreateningPlayer = this._currentPlayer;
         }
     }
 
@@ -329,14 +336,24 @@ public class ShogiEngineService : IAsyncDisposable
 
         // 評価値を先手視点に変換（エンジンは現在の手番視点で返すため）
         var normalizedScore = this._currentPlayer == Player.Gote ? -info.Score : info.Score;
-        var normalizedMate = this._currentPlayer == Player.Gote ? -info.MateIn : info.MateIn;
 
         // メインの評価値を更新（multipv=1または指定なしの場合、かつ新しい深さの場合）
         if ((info.MultiPv is null or 1) && isNewDepth) {
             this.Depth = info.Depth!.Value;
             if (normalizedScore.HasValue) {
                 this.Evaluation = normalizedScore.Value;
-                this.MateIn = normalizedMate;
+
+                // 詰みは手番視点でそのまま保存
+                if (info.MateIn.HasValue) {
+                    this.MateIn = info.MateIn.Value;
+                    this.MatePlayer = this._currentPlayer;
+                    // 詰みが検出されたら詰めろをリセット（詰みと詰めろは排他）
+                    this.IsThreatening = false;
+                    this.ThreateningMateIn = null;
+                }
+                else {
+                    this.MateIn = null;
+                }
             }
             if (info.Pv is not null) {
                 this.PrincipalVariation = info.Pv;
@@ -351,6 +368,8 @@ public class ShogiEngineService : IAsyncDisposable
         }
 
         // 候補手リストを更新（現在の深さ以上の結果のみ）
+        // 候補手の詰みも手番視点で正規化（正=手番側勝ち → 先手視点に変換）
+        var normalizedMate = this._currentPlayer == Player.Gote ? -info.MateIn : info.MateIn;
         if (info.MultiPv.HasValue && info.Move is not null && info.Depth.HasValue && info.Depth.Value >= this.Depth) {
             this._candidates[info.MultiPv.Value] = new CandidateMove(
                 info.MultiPv.Value,
