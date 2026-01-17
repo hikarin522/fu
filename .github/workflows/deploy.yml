@@ -93,11 +93,13 @@ jobs:
       - name: Change base href
         run: sed -i 's|<base href="/" />|<base href="/fu/" />|g' publish/wwwroot/index.html
 
-      - name: Add cache busting to JS files
+      - name: Add cache busting to static files
         run: |
           TIMESTAMP=$(date +%s)
           sed -i "s|js/webrtc.js\"|js/webrtc.js?v=$TIMESTAMP\"|g" publish/wwwroot/index.html
           sed -i "s|js/shogi-engine.js\"|js/shogi-engine.js?v=$TIMESTAMP\"|g" publish/wwwroot/index.html
+          sed -i "s|css/app.css\"|css/app.css?v=$TIMESTAMP\"|g" publish/wwwroot/index.html
+          sed -i "s|blazor.webassembly.js\"|blazor.webassembly.js?v=$TIMESTAMP\"|g" publish/wwwroot/index.html
 
       - name: Add .nojekyll
         run: touch publish/wwwroot/.nojekyll
