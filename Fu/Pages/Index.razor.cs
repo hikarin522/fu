@@ -20,11 +20,11 @@ public partial class Index : IAsyncDisposable
 
     [Parameter] public string? RoomIdParam { get; set; }
 
-    // 観戦者用の盤面反転状態
+    // 観戦者・検討中用の盤面反転状態
     private bool SpectatorFlipped { get; set; }
 
-    // 対局者は自分が後手なら反転、観戦者は手動切り替え
-    private bool IsFlipped => this.IsPlayer
+    // 対局者は自分が後手なら反転（検討中は手動切り替え）、観戦者は手動切り替え
+    private bool IsFlipped => this.IsPlayer && !this.GameService.State.IsReviewing
         ? this.GameService.State.LocalPlayer == Player.Gote
         : this.SpectatorFlipped;
 
@@ -87,8 +87,8 @@ public partial class Index : IAsyncDisposable
         }
     }
 
-    // 評価値表示（観戦者・対局終了後は常に全表示）
-    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded;
+    // 評価値表示（観戦者・対局終了後・検討中は常に全表示）
+    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded || this.GameService.State.IsReviewing;
     private bool ShowAdvantage => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
     private bool ShowEvaluationValue => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
     private bool ShowHasMate => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);

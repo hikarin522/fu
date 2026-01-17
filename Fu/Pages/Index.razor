@@ -143,12 +143,16 @@
                     </span>
                 </div>
 
-                @if (IsSpectator || IsGameEnded)
+                @if (IsSpectator || IsGameEnded || GameService.State.IsReviewing)
                 {
                     <div class="spectator-controls">
                         @if (IsSpectator)
                         {
                             <span class="spectator-notice">観戦中</span>
+                        }
+                        else if (GameService.State.IsReviewing)
+                        {
+                            <span class="spectator-notice">検討中</span>
                         }
                         <button class="btn-small" @onclick="ToggleBoardFlip" title="盤面を反転">
                             🔄 @(IsFlipped ? "後手視点" : "先手視点")
