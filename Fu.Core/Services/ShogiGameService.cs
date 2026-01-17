@@ -577,6 +577,24 @@ public class ShogiGameService
         }
     }
 
+    public async Task GoToNodeAsync(MoveNode? node)
+    {
+        if (node is null) {
+            // 開始位置に移動
+            this.State.MoveTree.GoToStart();
+            this.State = this.State with { ViewingMoveIndex = 0 };
+        } else {
+            // ノードに移動し、そのパスをMoveHistoryとして設定
+            this.State.MoveTree.GoTo(node);
+            var moves = node.GetMoves();
+            this.State = this.State with {
+                MoveHistory = moves,
+                ViewingMoveIndex = node.Depth
+            };
+        }
+        await this.NotifyStateChangedAsync();
+    }
+
     public (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) GetBoardAtMove(int moveIndex) =>
         ReconstructBoard(this.State.MoveHistory.Take(moveIndex));
 

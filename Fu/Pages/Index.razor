@@ -188,15 +188,11 @@
             <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
             <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
         }
-        <div class="history-list">
-            @for (int i = 0; i < GameService.State.MoveHistory.Count; i++)
-            {
-                var move = GameService.State.MoveHistory[i];
-                var index = i;
-                var isViewing = GameService.State.DisplayMoveIndex == i + 1;
-                <span class="move-entry @(isViewing ? "viewing" : "")" @onclick="() => GoToMoveAsync(index + 1)">@((i + 1)). @move.ToNotationWithFrom()</span>
-            }
-        </div>
+        <MoveTreeView
+            MoveTree="GameService.State.MoveTree"
+            CurrentNode="GameService.State.MoveTree.CurrentNode"
+            CurrentDepth="GameService.State.DisplayMoveIndex"
+            OnNodeSelected="OnTreeNodeSelected" />
     </div>
     }
 </div>

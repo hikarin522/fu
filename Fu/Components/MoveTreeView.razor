@@ -1,0 +1,141 @@
+@using Fu.Core.Models
+
+<div class="move-tree-view">
+    @if (MoveTree is not null)
+    {
+        <div class="tree-container">
+            @* メインライン（分岐インデックス0）を表示 *@
+            @{
+                var mainLine = BuildMainLine();
+                var branchPoints = GetBranchPoints();
+            }
+
+            <div class="main-line">
+                <span class="tree-node start @(CurrentDepth == 0 ? "current" : "")"
+                      @onclick="() => OnNodeClick(null)">開始</span>
+
+                @foreach (var (node, index) in mainLine.Select((n, i) => (n, i)))
+                {
+                    var isCurrent = CurrentNode == node;
+                    var hasBranch = node.Parent?.Children.Count > 1 || (node.Parent is null && MoveTree.RootChildren.Count > 1);
+                    var branchCount = node.Parent?.Children.Count ?? MoveTree.RootChildren.Count;
+
+                    <div class="tree-node-container">
+                        <span class="tree-connector">─</span>
+                        <span class="tree-node @(isCurrent ? "current" : "") @(hasBranch ? "has-branch" : "")"
+                              @onclick="() => OnNodeClick(node)"
+                              title="@node.Move.ToNotationWithFrom()">
+                            @((index + 1)). @node.Move.ToNotationWithFrom()
+                        </span>
+
+                        @if (hasBranch && branchCount > 1)
+                        {
+                            <span class="branch-indicator" title="@(branchCount - 1)個の分岐">
+                                ┬@(branchCount - 1)
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
+
+            @* 分岐を表示 *@
+            @foreach (var branchPoint in branchPoints)
+            {
+                var parentIndex = branchPoint.ParentIndex;
+                var branches = branchPoint.Branches.Skip(1).ToList(); // メインライン以外の分岐
+
+                @foreach (var (branch, branchIdx) in branches.Select((b, i) => (b, i)))
+                {
+                    <div class="branch-line" style="margin-left: @((parentIndex + 1) * 24 + 12)px;">
+                        <span class="branch-connector">└─</span>
+                        @{
+                            var branchNodes = GetBranchNodes(branch);
+                        }
+                        @foreach (var (node, nodeIdx) in branchNodes.Select((n, i) => (n, i)))
+                        {
+                            var isCurrent = CurrentNode == node;
+                            <span class="tree-node branch @(isCurrent ? "current" : "")"
+                                  @onclick="() => OnNodeClick(node)"
+                                  title="@node.Move.ToNotationWithFrom()">
+                                @if (nodeIdx > 0)
+                                {
+                                    <span class="tree-connector">─</span>
+                                }
+                                @((parentIndex + nodeIdx + 2)). @node.Move.ToNotationWithFrom()
+                            </span>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public MoveTree? MoveTree { get; set; }
+    [Parameter] public MoveNode? CurrentNode { get; set; }
+    [Parameter] public int CurrentDepth { get; set; }
+    [Parameter] public EventCallback<MoveNode?> OnNodeSelected { get; set; }
+
+    private async Task OnNodeClick(MoveNode? node)
+    {
+        await OnNodeSelected.InvokeAsync(node);
+    }
+
+    private List<MoveNode> BuildMainLine()
+    {
+        if (MoveTree is null) return [];
+
+        var result = new List<MoveNode>();
+        var children = MoveTree.RootChildren;
+
+        while (children.Count > 0)
+        {
+            var node = children[0]; // メインラインは常に最初の子
+            result.Add(node);
+            children = node.Children;
+        }
+
+        return result;
+    }
+
+    private List<(int ParentIndex, IReadOnlyList<MoveNode> Branches)> GetBranchPoints()
+    {
+        if (MoveTree is null) return [];
+
+        var result = new List<(int, IReadOnlyList<MoveNode>)>();
+
+        // ルートの分岐
+        if (MoveTree.RootChildren.Count > 1)
+        {
+            result.Add((-1, MoveTree.RootChildren));
+        }
+
+        // メインライン上の分岐点
+        var mainLine = BuildMainLine();
+        for (int i = 0; i < mainLine.Count; i++)
+        {
+            var node = mainLine[i];
+            if (node.Children.Count > 1)
+            {
+                result.Add((i, node.Children));
+            }
+        }
+
+        return result;
+    }
+
+    private List<MoveNode> GetBranchNodes(MoveNode startNode)
+    {
+        var result = new List<MoveNode> { startNode };
+        var current = startNode;
+
+        while (current.Children.Count > 0)
+        {
+            current = current.Children[0];
+            result.Add(current);
+        }
+
+        return result;
+    }
+}

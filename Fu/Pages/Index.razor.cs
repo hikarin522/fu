@@ -344,6 +344,8 @@ public partial class Index : IAsyncDisposable
 
     private Task ResumeFromBranchAsync() => this.GameService.ResumeFromBranchAsync();
 
+    private Task OnTreeNodeSelected(MoveNode? node) => this.GameService.GoToNodeAsync(node);
+
     /// <summary>Cross-Origin Isolationが無効な場合、Service Workerを有効にするためにリロードする</summary>
     private async Task CheckAndReloadForCrossOriginIsolationAsync()
     {
