@@ -13,6 +13,7 @@ public partial class Index : IAsyncDisposable
 {
     [Inject] private ShogiGameService GameService { get; set; } = null!;
     [Inject] private WebRtcService WebRtcService { get; set; } = null!;
+    [Inject] private ShogiEngineService EngineService { get; set; } = null!;
     [Inject] private IJSRuntime JS { get; set; } = null!;
     [Inject] private NavigationManager Navigation { get; set; } = null!;
 
@@ -52,6 +53,9 @@ public partial class Index : IAsyncDisposable
             this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
             this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
             this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
+
+            // エンジン初期化（バックグラウンドで実行）
+            _ = this.InitializeEngineAsync();
         }
         catch (Exception ex) {
             this.InitError = ex.Message;
@@ -99,7 +103,15 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private async ValueTask OnGameStateChangedAsync() => await this.InvokeAsync(this.StateHasChanged);
+    private async ValueTask OnGameStateChangedAsync()
+    {
+        await this.InvokeAsync(this.StateHasChanged);
+
+        // 観戦者の場合は評価をリクエスト
+        if (this.IsSpectator && this.EngineService.IsAvailable) {
+            await this.RequestEvaluationAsync();
+        }
+    }
 
     private void OpenNewGameDialog()
     {
@@ -205,6 +217,41 @@ public partial class Index : IAsyncDisposable
         await this.WebRtcService.SendBranchResumeAsync(moveHistory);
     }
 
+    private async Task InitializeEngineAsync()
+    {
+        try {
+            await this.EngineService.InitializeAsync();
+            this.EngineService.OnEvaluationUpdated += this.OnEvaluationUpdatedAsync;
+        }
+        catch {
+            // エンジン初期化失敗は無視
+        }
+    }
+
+    private async Task OnEvaluationUpdatedAsync()
+    {
+        await this.InvokeAsync(this.StateHasChanged);
+    }
+
+    private async Task RequestEvaluationAsync()
+    {
+        if (!this.IsSpectator || !this.EngineService.IsAvailable) {
+            return;
+        }
+
+        var state = this.GameService.State;
+        var (board, senteCaptured, goteCaptured, currentPlayer) = state.IsReviewing
+            ? this.GameService.GetBoardAtMove(state.DisplayMoveIndex)
+            : (state.Board, state.SenteCaptured, state.GoteCaptured, state.CurrentPlayer);
+
+        await this.EngineService.AnalyzePositionAsync(
+            board,
+            currentPlayer,
+            senteCaptured,
+            goteCaptured,
+            depth: 15);
+    }
+
     private async Task DownloadKifAsync()
     {
         var kif = KifExporter.Export(
@@ -238,6 +285,8 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnBranchResumeReceived -= this.OnBranchResumeReceivedAsync;
         this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
         this.GameService.OnBranchResumedAsync -= this.OnBranchResumedAsync;
+        this.EngineService.OnEvaluationUpdated -= this.OnEvaluationUpdatedAsync;
+        await this.EngineService.DisposeAsync();
         await this.WebRtcService.DisposeAsync();
         GC.SuppressFinalize(this);
     }

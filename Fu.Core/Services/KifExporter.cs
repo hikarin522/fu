@@ -19,7 +19,6 @@ public static class KifExporter
         sb.AppendLine("#KIF version=2.0 encoding=UTF-8");
 
         // ヘッダー
-        sb.AppendLine("# ---- 将棋オンライン対戦 棋譜 ----");
         sb.AppendLine(CultureInfo.InvariantCulture, $"開始日時：{DateTime.Now:yyyy/MM/dd HH:mm:ss}");
         sb.AppendLine("手合割：平手");
         sb.AppendLine(CultureInfo.InvariantCulture, $"先手：{senteNickname}");
@@ -31,19 +30,15 @@ public static class KifExporter
             var move = moves[i];
             var moveNumber = i + 1;
             var notation = FormatMove(move, lastTo);
+            // KIF標準形式: "   1 ７六歩(77)"（手数は右寄せ4桁、スペース、指し手）
             sb.AppendLine(CultureInfo.InvariantCulture, $"{moveNumber,4} {notation}");
             lastTo = move.To;
         }
 
         // 終局
-        var resultText = status switch {
-            GameStatus.CheckmateSente => "まで先手の勝ち",
-            GameStatus.CheckmateGote => "まで後手の勝ち",
-            _ => ""
-        };
-
-        if (!string.IsNullOrEmpty(resultText)) {
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{moves.Count,4} {resultText}");
+        if (status is GameStatus.CheckmateSente or GameStatus.CheckmateGote) {
+            var winner = status == GameStatus.CheckmateSente ? "先手" : "後手";
+            sb.AppendLine(CultureInfo.InvariantCulture, $"まで{moves.Count}手で{winner}の勝ち");
         }
 
         return sb.ToString();

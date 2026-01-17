@@ -1,0 +1,83 @@
+@using Fu.Services
+
+<div class="evaluation-container">
+    @if (!EngineService.IsAvailable)
+    {
+        <div class="evaluation-unavailable">
+            <span>評価機能は利用できません</span>
+            <small>(Cross-Origin Isolation が必要)</small>
+        </div>
+    }
+    else
+    {
+        <div class="evaluation-bar">
+            <div class="evaluation-fill" style="height: @FillPercentage%"></div>
+            <div class="evaluation-center"></div>
+        </div>
+        <div class="evaluation-info">
+            <div class="evaluation-value @(EvaluationClass)">
+                @EvaluationText
+            </div>
+            @if (EngineService.Depth > 0)
+            {
+                <div class="evaluation-depth">深さ: @EngineService.Depth</div>
+            }
+            @if (EngineService.IsAnalyzing)
+            {
+                <div class="evaluation-analyzing">分析中...</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public ShogiEngineService EngineService { get; set; } = null!;
+
+    private int FillPercentage
+    {
+        get
+        {
+            if (EngineService.Evaluation is not { } eval) {
+                return 50;
+            }
+            // 評価値を0-100%に変換（-2000〜+2000を0〜100にマッピング）
+            var clamped = Math.Clamp(eval, -2000, 2000);
+            return 50 + (int)(clamped / 40.0);
+        }
+    }
+
+    private string EvaluationText
+    {
+        get
+        {
+            if (EngineService.Evaluation is not { } eval) {
+                return "---";
+            }
+            if (eval > 29000) {
+                return "先手勝ち";
+            }
+            if (eval < -29000) {
+                return "後手勝ち";
+            }
+            // センチポーンを歩の価値で表示
+            var pawnValue = eval / 100.0;
+            return pawnValue >= 0 ? $"+{pawnValue:F1}" : $"{pawnValue:F1}";
+        }
+    }
+
+    private string EvaluationClass
+    {
+        get
+        {
+            if (EngineService.Evaluation is not { } eval) {
+                return "";
+            }
+            return eval switch {
+                > 500 => "sente-advantage",
+                < -500 => "gote-advantage",
+                _ => "even"
+            };
+        }
+    }
+}

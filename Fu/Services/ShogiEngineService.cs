@@ -1,0 +1,249 @@
+using Microsoft.JSInterop;
+
+using Fu.Core.Models;
+
+namespace Fu.Services;
+
+/// <summary>
+/// YaneuraOu WASM エンジンとのインターフェース
+/// </summary>
+public class ShogiEngineService : IAsyncDisposable
+{
+    private readonly IJSRuntime _jsRuntime;
+    private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
+    private bool _initialized;
+    private bool _isAnalyzing;
+
+    /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
+    public int? Evaluation { get; private set; }
+
+    /// <summary>最善手</summary>
+    public string? BestMove { get; private set; }
+
+    /// <summary>読み筋</summary>
+    public string? PrincipalVariation { get; private set; }
+
+    /// <summary>探索深さ</summary>
+    public int Depth { get; private set; }
+
+    /// <summary>エンジンが利用可能か</summary>
+    public bool IsAvailable { get; private set; }
+
+    /// <summary>分析中か</summary>
+    public bool IsAnalyzing => this._isAnalyzing;
+
+    /// <summary>評価値が更新された時のイベント</summary>
+    public event Func<Task>? OnEvaluationUpdated;
+
+    public ShogiEngineService(IJSRuntime jsRuntime) => this._jsRuntime = jsRuntime;
+
+    /// <summary>エンジンを初期化</summary>
+    public async Task<bool> InitializeAsync()
+    {
+        if (this._initialized) {
+            return this.IsAvailable;
+        }
+
+        try {
+            // SharedArrayBufferが利用可能か確認
+            var isCrossOriginIsolated = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.isCrossOriginIsolated");
+            if (!isCrossOriginIsolated) {
+                Console.WriteLine("Cross-origin isolation is not enabled. Engine will not be available.");
+                this._initialized = true;
+                this.IsAvailable = false;
+                return false;
+            }
+
+            this._dotNetRef = DotNetObjectReference.Create(this);
+            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
+
+            var success = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init");
+            this._initialized = true;
+            this.IsAvailable = success;
+
+            if (success) {
+                // エンジンの設定
+                await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "isready");
+            }
+
+            return success;
+        }
+        catch (Exception ex) {
+            Console.WriteLine($"Failed to initialize engine: {ex.Message}");
+            this._initialized = true;
+            this.IsAvailable = false;
+            return false;
+        }
+    }
+
+    /// <summary>局面を分析</summary>
+    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 10)
+    {
+        if (!this.IsAvailable) {
+            return;
+        }
+
+        var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
+        this._isAnalyzing = true;
+
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
+    }
+
+    /// <summary>分析を停止</summary>
+    public async Task StopAnalysisAsync()
+    {
+        if (!this.IsAvailable) {
+            return;
+        }
+
+        this._isAnalyzing = false;
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
+    }
+
+    /// <summary>エンジンからのメッセージを処理</summary>
+    [JSInvokable]
+    public async Task OnEngineMessage(string message)
+    {
+        // USIプロトコルのメッセージをパース
+        if (message.StartsWith("info ", StringComparison.Ordinal)) {
+            this.ParseInfoMessage(message);
+            if (OnEvaluationUpdated is { } handler) {
+                await handler();
+            }
+        }
+        else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
+            var parts = message.Split(' ');
+            if (parts.Length >= 2) {
+                this.BestMove = parts[1];
+            }
+            this._isAnalyzing = false;
+            if (OnEvaluationUpdated is { } handler) {
+                await handler();
+            }
+        }
+    }
+
+    private void ParseInfoMessage(string message)
+    {
+        var parts = message.Split(' ');
+
+        for (var i = 0; i < parts.Length; i++) {
+            switch (parts[i]) {
+                case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var depth):
+                    this.Depth = depth;
+                    break;
+
+                case "score" when i + 2 < parts.Length:
+                    if (parts[i + 1] == "cp" && int.TryParse(parts[i + 2], out var cp)) {
+                        this.Evaluation = cp;
+                    }
+                    else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
+                        // 詰み: 正の値は先手勝ち、負の値は後手勝ち
+                        this.Evaluation = mate > 0 ? 30000 - mate : -30000 - mate;
+                    }
+                    break;
+
+                case "pv" when i + 1 < parts.Length:
+                    this.PrincipalVariation = string.Join(" ", parts.Skip(i + 1));
+                    break;
+            }
+        }
+    }
+
+    /// <summary>盤面をSFEN形式に変換</summary>
+    private static string ToSfen(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        // 盤面
+        for (var row = 0; row < 9; row++) {
+            var emptyCount = 0;
+            for (var col = 0; col < 9; col++) {
+                var piece = board[col, row];
+                if (piece is null) {
+                    emptyCount++;
+                }
+                else {
+                    if (emptyCount > 0) {
+                        sb.Append(emptyCount);
+                        emptyCount = 0;
+                    }
+                    sb.Append(PieceToSfen(piece));
+                }
+            }
+            if (emptyCount > 0) {
+                sb.Append(emptyCount);
+            }
+            if (row < 8) {
+                sb.Append('/');
+            }
+        }
+
+        // 手番
+        sb.Append(currentPlayer == Player.Sente ? " b " : " w ");
+
+        // 持ち駒
+        var captured = CapturedToSfen(senteCaptured, true) + CapturedToSfen(goteCaptured, false);
+        sb.Append(string.IsNullOrEmpty(captured) ? "-" : captured);
+
+        // 手数（常に1）
+        sb.Append(" 1");
+
+        return sb.ToString();
+    }
+
+    private static string PieceToSfen(Piece piece)
+    {
+        var c = piece.Type switch {
+            PieceType.King => "K",
+            PieceType.Rook => "R",
+            PieceType.Bishop => "B",
+            PieceType.Gold => "G",
+            PieceType.Silver => "S",
+            PieceType.Knight => "N",
+            PieceType.Lance => "L",
+            PieceType.Pawn => "P",
+            PieceType.PromotedRook => "+R",
+            PieceType.PromotedBishop => "+B",
+            PieceType.PromotedSilver => "+S",
+            PieceType.PromotedKnight => "+N",
+            PieceType.PromotedLance => "+L",
+            PieceType.PromotedPawn => "+P",
+            _ => ""
+        };
+        return piece.Owner == Player.Sente ? c : c.ToLowerInvariant();
+    }
+
+    private static string CapturedToSfen(CapturedPieces captured, bool isSente)
+    {
+        var sb = new System.Text.StringBuilder();
+        void Append(int count, char c)
+        {
+            if (count > 0) {
+                if (count > 1) {
+                    sb.Append(count);
+                }
+                sb.Append(isSente ? c : char.ToLowerInvariant(c));
+            }
+        }
+
+        Append(captured.GetCount(PieceType.Rook), 'R');
+        Append(captured.GetCount(PieceType.Bishop), 'B');
+        Append(captured.GetCount(PieceType.Gold), 'G');
+        Append(captured.GetCount(PieceType.Silver), 'S');
+        Append(captured.GetCount(PieceType.Knight), 'N');
+        Append(captured.GetCount(PieceType.Lance), 'L');
+        Append(captured.GetCount(PieceType.Pawn), 'P');
+
+        return sb.ToString();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (this.IsAvailable) {
+            await this.StopAnalysisAsync();
+        }
+        this._dotNetRef?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+}

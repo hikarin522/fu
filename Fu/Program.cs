@@ -12,5 +12,6 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 builder.Services.AddScoped<ShogiGameService>();
 builder.Services.AddScoped<WebRtcService>();
+builder.Services.AddScoped<ShogiEngineService>();
 
 await builder.Build().RunAsync();
