@@ -51,7 +51,8 @@ public sealed record GameStateSyncMessage(
     string SenteNickname,
     string GoteNickname,
     string Status,
-    EvaluationDisplayOptions? EvaluationOptions = null
+    EvaluationDisplayOptions? EvaluationOptions = null,
+    int[]? MoveTimes = null
 ) : WebRtcMessage("gameStateSync");
 
 /// <summary>

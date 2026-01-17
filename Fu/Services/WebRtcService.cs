@@ -97,7 +97,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public Task SendGameStateRequestAsync() =>
         this.SendMessageAsync(new GameStateRequestMessage());
 
-    public Task SendGameStateSyncAsync(IEnumerable<Move> moveHistory, string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, GameStatus status, EvaluationDisplayOptions? evaluationOptions = null) =>
+    public Task SendGameStateSyncAsync(IEnumerable<Move> moveHistory, string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, GameStatus status, EvaluationDisplayOptions? evaluationOptions = null, IEnumerable<TimeSpan>? moveTimes = null) =>
         this.SendMessageAsync(new GameStateSyncMessage(
             moveHistory.Select(m => m.ToDto()).ToArray(),
             sentePeerId,
@@ -105,7 +105,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
             senteNickname,
             goteNickname,
             status.ToString(),
-            evaluationOptions
+            evaluationOptions,
+            moveTimes?.Select(t => (int)t.TotalSeconds).ToArray()
         ));
 
     public Task SendBranchResumeAsync(IEnumerable<Move> moveHistory) =>
@@ -284,7 +285,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         if (msg is not null && OnGameStateSyncReceived is { } handler) {
             var moves = msg.MoveHistory.Select(Move.FromDto).ToList();
             var status = Enum.TryParse<GameStatus>(msg.Status, out var s) ? s : GameStatus.WaitingForConnection;
-            await handler(new GameStateSyncInfo(moves, msg.SentePeerId, msg.GotePeerId, msg.SenteNickname, msg.GoteNickname, status, msg.EvaluationOptions));
+            var moveTimes = msg.MoveTimes?.Select(t => TimeSpan.FromSeconds(t)).ToList();
+            await handler(new GameStateSyncInfo(moves, msg.SentePeerId, msg.GotePeerId, msg.SenteNickname, msg.GoteNickname, status, msg.EvaluationOptions, moveTimes));
         }
     }
 
@@ -349,5 +351,6 @@ public record GameStateSyncInfo(
     string SenteNickname,
     string GoteNickname,
     GameStatus Status,
-    EvaluationDisplayOptions? EvaluationOptions
+    EvaluationDisplayOptions? EvaluationOptions,
+    IReadOnlyList<TimeSpan>? MoveTimes
 );

@@ -92,7 +92,7 @@ public class ShogiGameService
     }
 
     /// <summary>棋譜からゲーム状態を復元する共通メソッド</summary>
-    private void RestoreFromMoveHistory(IReadOnlyList<Move> moveHistory, GameStatus status, bool preserveMoveTree, bool resetTimes = false)
+    private void RestoreFromMoveHistory(IReadOnlyList<Move> moveHistory, GameStatus status, bool preserveMoveTree, bool resetTimes = false, IReadOnlyList<TimeSpan>? moveTimes = null)
     {
         var localPlayer = this.State.LocalPlayer;
         var (board, senteCaptured, goteCaptured, currentPlayer) = ReconstructBoard(moveHistory);
@@ -102,6 +102,13 @@ public class ShogiGameService
         foreach (var move in moveHistory) {
             moveTree.AddMove(move);
         }
+
+        // 持ち時間の決定: 明示的に指定 > リセット > 既存の時間を維持
+        var times = moveTimes is not null
+            ? [.. moveTimes]
+            : resetTimes
+                ? []
+                : this.State.Times;
 
         this.State = new GameState(
             board,
@@ -113,7 +120,7 @@ public class ShogiGameService
             localPlayer,
             null,
             null,
-            resetTimes ? [] : this.State.Times
+            times
         ) { MoveTree = moveTree };
     }
 
@@ -564,9 +571,9 @@ public class ShogiGameService
     }
 
     /// <summary>途中参加者向けにゲーム状態を復元</summary>
-    public async Task RestoreStateAsync(IReadOnlyList<Move> moveHistory, GameStatus status)
+    public async Task RestoreStateAsync(IReadOnlyList<Move> moveHistory, GameStatus status, IReadOnlyList<TimeSpan>? moveTimes = null)
     {
-        this.RestoreFromMoveHistory(moveHistory, status, preserveMoveTree: false);
+        this.RestoreFromMoveHistory(moveHistory, status, preserveMoveTree: false, moveTimes: moveTimes);
 
         if (status == GameStatus.Playing) {
             this.StartTurnTimer();

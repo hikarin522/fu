@@ -385,7 +385,8 @@ public partial class Index : IAsyncDisposable
             this.SenteNickname,
             this.GoteNickname,
             this.GameService.State.Status,
-            this.CurrentEvaluationOptions
+            this.CurrentEvaluationOptions,
+            this.GameService.State.Times
         );
 
     private async Task OnGameStateSyncReceivedAsync(GameStateSyncInfo info)
@@ -405,8 +406,8 @@ public partial class Index : IAsyncDisposable
 
             await this.GameService.SetLocalPlayerAsync(localPlayer);
 
-            // ゲーム状態を復元
-            await this.GameService.RestoreStateAsync(info.MoveHistory, info.Status);
+            // ゲーム状態を復元（持ち時間含む）
+            await this.GameService.RestoreStateAsync(info.MoveHistory, info.Status, info.MoveTimes);
 
             // 対局者かつ対局中ならセッション保存、終了していればクリア
             if (localPlayer != Player.None) {
