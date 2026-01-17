@@ -106,7 +106,7 @@
 
         var nodePath = node.GetMoves();
         for (int i = 0; i < nodePath.Count && i < MoveHistory.Count; i++) {
-            if (nodePath[i] != MoveHistory[i]) {
+            if (!MoveNode.IsSameMove(nodePath[i], MoveHistory[i])) {
                 return false;
             }
         }

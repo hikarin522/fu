@@ -99,21 +99,7 @@ public partial class Index : IAsyncDisposable
             // 通知音設定を読み込み
             this.SoundEnabled = await this.LoadSoundSettingAsync();
 
-            this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceivedAsync;
-            this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
-            this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
-            this.WebRtcService.OnGameStartWithPlayers += this.OnGameStartWithPlayersAsync;
-            this.WebRtcService.OnResignReceived += this.OnRemoteResignReceivedAsync;
-            this.WebRtcService.OnGameStateRequested += this.OnGameStateRequestedAsync;
-            this.WebRtcService.OnGameStateSyncReceived += this.OnGameStateSyncReceivedAsync;
-            this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
-            this.WebRtcService.OnRematchReceived += this.OnRematchReceivedAsync;
-            this.WebRtcService.OnReviewStartReceived += this.OnReviewStartReceivedAsync;
-            this.WebRtcService.OnReviewMoveReceived += this.OnReviewMoveReceivedAsync;
-            this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
-            this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
-            this.GameService.OnReviewStartedAsync += this.OnReviewStartedAsync;
-            this.GameService.OnReviewMoveAsync += this.OnReviewMoveAsync;
+            this.SubscribeToEvents();
 
             // エンジン初期化（バックグラウンドで実行）
             _ = this.InitializeEngineAsync();
@@ -551,11 +537,37 @@ public partial class Index : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        // UIタイマーを破棄
         if (this._uiTimer is not null) {
             await this._uiTimer.DisposeAsync();
         }
 
+        this.UnsubscribeFromEvents();
+        await this.EngineService.DisposeAsync();
+        await this.WebRtcService.DisposeAsync();
+        GC.SuppressFinalize(this);
+    }
+
+    private void SubscribeToEvents()
+    {
+        this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceivedAsync;
+        this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
+        this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
+        this.WebRtcService.OnGameStartWithPlayers += this.OnGameStartWithPlayersAsync;
+        this.WebRtcService.OnResignReceived += this.OnRemoteResignReceivedAsync;
+        this.WebRtcService.OnGameStateRequested += this.OnGameStateRequestedAsync;
+        this.WebRtcService.OnGameStateSyncReceived += this.OnGameStateSyncReceivedAsync;
+        this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
+        this.WebRtcService.OnRematchReceived += this.OnRematchReceivedAsync;
+        this.WebRtcService.OnReviewStartReceived += this.OnReviewStartReceivedAsync;
+        this.WebRtcService.OnReviewMoveReceived += this.OnReviewMoveReceivedAsync;
+        this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
+        this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
+        this.GameService.OnReviewStartedAsync += this.OnReviewStartedAsync;
+        this.GameService.OnReviewMoveAsync += this.OnReviewMoveAsync;
+    }
+
+    private void UnsubscribeFromEvents()
+    {
         this.WebRtcService.OnMoveReceived -= this.OnRemoteMoveReceivedAsync;
         this.WebRtcService.OnGameStart -= this.OnRemoteGameStartAsync;
         this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReadyAsync;
@@ -572,8 +584,5 @@ public partial class Index : IAsyncDisposable
         this.GameService.OnReviewStartedAsync -= this.OnReviewStartedAsync;
         this.GameService.OnReviewMoveAsync -= this.OnReviewMoveAsync;
         this.EngineService.OnEvaluationUpdated -= this.OnEvaluationUpdatedAsync;
-        await this.EngineService.DisposeAsync();
-        await this.WebRtcService.DisposeAsync();
-        GC.SuppressFinalize(this);
     }
 }

@@ -40,7 +40,7 @@ public sealed class MoveNode
     }
 
     /// <summary>棋譜ツリー上で同じ手とみなすか（Player,CapturedPieceは無視）</summary>
-    internal static bool IsSameMove(Move a, Move b) =>
+    public static bool IsSameMove(Move a, Move b) =>
         a.To == b.To &&
         a.PieceType == b.PieceType &&
         a.IsPromotion == b.IsPromotion &&
