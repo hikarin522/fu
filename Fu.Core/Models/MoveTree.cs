@@ -177,6 +177,34 @@ public sealed class MoveTree
     /// <summary>現在位置に分岐があるか</summary>
     public bool HasBranchesAtCurrent => this.NextMoves.Count > 1;
 
+    /// <summary>ツリー内の分岐点の総数（子が2つ以上あるノードの数）</summary>
+    public int TotalBranchCount
+    {
+        get
+        {
+            var count = 0;
+            // ルートに複数の子があれば分岐
+            if (this._rootChildren.Count > 1) {
+                count++;
+            }
+            // 全ノードを走査して分岐点をカウント
+            count += CountBranchesRecursive(this._rootChildren);
+            return count;
+        }
+    }
+
+    private static int CountBranchesRecursive(IReadOnlyList<MoveNode> nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes) {
+            if (node.Children.Count > 1) {
+                count++;
+            }
+            count += CountBranchesRecursive(node.Children);
+        }
+        return count;
+    }
+
     /// <summary>全ての手（現在のラインのフラット表示用）</summary>
     public ImmutableList<Move> GetFlatMoves()
     {
