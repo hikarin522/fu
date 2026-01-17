@@ -405,6 +405,45 @@ a, .btn-link {
     color: #333;
 }
 
+.option-title {
+    font-weight: bold;
+    margin-bottom: 4px;
+    color: #333;
+}
+
+.option-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-top: 8px;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.option-hint {
+    display: block;
+    font-size: 12px;
+    color: #888;
+    margin-top: 4px;
+}
+
 .divider {
     text-align: center;
     color: #999;
@@ -892,6 +931,29 @@ a, .btn-link {
     color: #666;
 }
 
+.advantage-indicator {
+    font-size: 14px;
+    font-weight: bold;
+    padding: 6px 12px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.advantage-indicator.sente-advantage {
+    background: rgba(76, 175, 80, 0.15);
+    color: #2e7d32;
+}
+
+.advantage-indicator.gote-advantage {
+    background: rgba(33, 150, 243, 0.15);
+    color: #1565c0;
+}
+
+.advantage-indicator.even {
+    background: rgba(158, 158, 158, 0.15);
+    color: #616161;
+}
+
 .evaluation-depth {
     font-size: 11px;
     color: #999;
@@ -900,6 +962,80 @@ a, .btn-link {
 .evaluation-analyzing {
     font-size: 11px;
     color: #ff9800;
+}
+
+.mate-info {
+    font-size: 12px;
+    font-weight: bold;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+
+.mate-info.sente-mate {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.mate-info.gote-mate {
+    background: #fce4ec;
+    color: #c62828;
+}
+
+.candidates-list {
+    margin-top: 8px;
+    padding: 8px;
+    background: #f5f5f5;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.candidates-title {
+    font-weight: bold;
+    margin-bottom: 6px;
+    color: #666;
+    font-size: 11px;
+}
+
+.candidate-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.candidate-item:last-child {
+    border-bottom: none;
+}
+
+.candidate-rank {
+    color: #999;
+    font-weight: bold;
+    min-width: 16px;
+}
+
+.candidate-move {
+    font-family: 'Noto Sans JP', sans-serif;
+    flex: 1;
+}
+
+.candidate-eval {
+    font-weight: bold;
+    min-width: 40px;
+    text-align: right;
+}
+
+.candidate-eval.sente-advantage {
+    color: #4caf50;
+}
+
+.candidate-eval.gote-advantage {
+    color: #2196f3;
+}
+
+.candidate-eval.even {
+    color: #666;
 }
 
 .evaluation-unavailable {

@@ -10,15 +10,56 @@
     }
     else
     {
-        <div class="evaluation-bar">
-            <div class="evaluation-fill" style="height: @FillPercentage%"></div>
-            <div class="evaluation-center"></div>
-        </div>
-        <div class="evaluation-info">
-            <div class="evaluation-value @(EvaluationClass)">
-                @EvaluationText
+        @if (ShowEvaluationValue)
+        {
+            <div class="evaluation-bar">
+                <div class="evaluation-fill" style="height: @FillPercentage%"></div>
+                <div class="evaluation-center"></div>
             </div>
-            @if (EngineService.Depth > 0)
+        }
+        <div class="evaluation-info">
+            @if (ShowAdvantage)
+            {
+                <div class="advantage-indicator @(AdvantageClass)">
+                    @AdvantageText
+                </div>
+            }
+            @if (ShowEvaluationValue)
+            {
+                <div class="evaluation-value @(EvaluationClass)">
+                    @EvaluationText
+                </div>
+            }
+            @if (ShowHasMate && EngineService.MateIn is { } mate)
+            {
+                <div class="mate-info @(mate > 0 ? "sente-mate" : "gote-mate")">
+                    @if (ShowMateCount)
+                    {
+                        @(mate > 0 ? $"先手{mate}手詰み" : $"後手{-mate}手詰み")
+                    }
+                    else
+                    {
+                        @(mate > 0 ? "先手に詰みあり" : "後手に詰みあり")
+                    }
+                </div>
+            }
+            @if (ShowCandidates && EngineService.Candidates.Count > 0)
+            {
+                <div class="candidates-list">
+                    <div class="candidates-title">候補手</div>
+                    @foreach (var candidate in EngineService.Candidates.Take(3))
+                    {
+                        <div class="candidate-item">
+                            <span class="candidate-rank">@candidate.Rank.</span>
+                            <span class="candidate-move">@FormatMove(candidate.Move)</span>
+                            <span class="candidate-eval @(GetEvalClass(candidate.Evaluation))">
+                                @FormatEvaluation(candidate.Evaluation, candidate.MateIn)
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+            @if (ShowEvaluationValue && EngineService.Depth > 0)
             {
                 <div class="evaluation-depth">深さ: @EngineService.Depth</div>
             }
@@ -34,6 +75,21 @@
     [Parameter, EditorRequired]
     public ShogiEngineService EngineService { get; set; } = null!;
 
+    [Parameter]
+    public bool ShowAdvantage { get; set; } = true;
+
+    [Parameter]
+    public bool ShowEvaluationValue { get; set; } = true;
+
+    [Parameter]
+    public bool ShowHasMate { get; set; } = true;
+
+    [Parameter]
+    public bool ShowMateCount { get; set; } = true;
+
+    [Parameter]
+    public bool ShowCandidates { get; set; } = false;
+
     private int FillPercentage
     {
         get
@@ -44,6 +100,44 @@
             // 評価値を0-100%に変換（-2000〜+2000を0〜100にマッピング）
             var clamped = Math.Clamp(eval, -2000, 2000);
             return 50 + (int)(clamped / 40.0);
+        }
+    }
+
+    private string AdvantageText
+    {
+        get
+        {
+            if (EngineService.Evaluation is not { } eval) {
+                return "---";
+            }
+            if (eval > 29000) {
+                return "先手勝勢";
+            }
+            if (eval < -29000) {
+                return "後手勝勢";
+            }
+            return eval switch {
+                > 500 => "先手優勢",
+                > 200 => "先手有利",
+                < -500 => "後手優勢",
+                < -200 => "後手有利",
+                _ => "互角"
+            };
+        }
+    }
+
+    private string AdvantageClass
+    {
+        get
+        {
+            if (EngineService.Evaluation is not { } eval) {
+                return "";
+            }
+            return eval switch {
+                > 200 => "sente-advantage",
+                < -200 => "gote-advantage",
+                _ => "even"
+            };
         }
     }
 
@@ -79,5 +173,72 @@
                 _ => "even"
             };
         }
+    }
+
+    private static string GetEvalClass(int? eval)
+    {
+        if (eval is not { } e) {
+            return "";
+        }
+        return e switch {
+            > 500 => "sente-advantage",
+            < -500 => "gote-advantage",
+            _ => "even"
+        };
+    }
+
+    private static string FormatEvaluation(int? eval, int? mateIn)
+    {
+        if (mateIn is { } mate) {
+            return mate > 0 ? $"#{mate}" : $"#-{-mate}";
+        }
+        if (eval is not { } e) {
+            return "---";
+        }
+        if (e > 29000) {
+            return "勝ち";
+        }
+        if (e < -29000) {
+            return "負け";
+        }
+        var pawnValue = e / 100.0;
+        return pawnValue >= 0 ? $"+{pawnValue:F0}" : $"{pawnValue:F0}";
+    }
+
+    private static string FormatMove(string usiMove)
+    {
+        // USI形式の手を表示用に変換（簡易的な変換）
+        if (string.IsNullOrEmpty(usiMove)) {
+            return "---";
+        }
+
+        // 駒打ちの場合（例: P*3d）
+        if (usiMove.Length == 4 && usiMove[1] == '*') {
+            var piece = usiMove[0] switch {
+                'P' => "歩",
+                'L' => "香",
+                'N' => "桂",
+                'S' => "銀",
+                'G' => "金",
+                'B' => "角",
+                'R' => "飛",
+                _ => usiMove[0].ToString()
+            };
+            var col = 9 - (usiMove[2] - '1');
+            var row = usiMove[3] - 'a' + 1;
+            return $"{col}{row}{piece}打";
+        }
+
+        // 通常の移動（例: 7g7f, 7g7f+）
+        if (usiMove.Length >= 4) {
+            var fromCol = 9 - (usiMove[0] - '1');
+            var fromRow = usiMove[1] - 'a' + 1;
+            var toCol = 9 - (usiMove[2] - '1');
+            var toRow = usiMove[3] - 'a' + 1;
+            var promote = usiMove.Length > 4 && usiMove[4] == '+' ? "成" : "";
+            return $"{toCol}{toRow}{promote}({fromCol}{fromRow})";
+        }
+
+        return usiMove;
     }
 }

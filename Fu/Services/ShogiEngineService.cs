@@ -5,6 +5,17 @@ using Fu.Core.Models;
 namespace Fu.Services;
 
 /// <summary>
+/// 候補手の情報
+/// </summary>
+public record CandidateMove(
+    int Rank,
+    string Move,
+    int? Evaluation,
+    int? MateIn,
+    string? PrincipalVariation
+);
+
+/// <summary>
 /// YaneuraOu WASM エンジンとのインターフェース
 /// </summary>
 public class ShogiEngineService : IAsyncDisposable
@@ -13,9 +24,13 @@ public class ShogiEngineService : IAsyncDisposable
     private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
     private bool _initialized;
     private bool _isAnalyzing;
+    private readonly Dictionary<int, CandidateMove> _candidates = [];
 
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
+
+    /// <summary>詰み手数（正:先手勝ち、負:後手勝ち、null:詰みなし）</summary>
+    public int? MateIn { get; private set; }
 
     /// <summary>最善手</summary>
     public string? BestMove { get; private set; }
@@ -25,6 +40,9 @@ public class ShogiEngineService : IAsyncDisposable
 
     /// <summary>探索深さ</summary>
     public int Depth { get; private set; }
+
+    /// <summary>候補手リスト（MultiPV）</summary>
+    public IReadOnlyList<CandidateMove> Candidates => this._candidates.Values.OrderBy(c => c.Rank).ToList();
 
     /// <summary>エンジンが利用可能か</summary>
     public bool IsAvailable { get; private set; }
@@ -77,7 +95,7 @@ public class ShogiEngineService : IAsyncDisposable
     }
 
     /// <summary>局面を分析</summary>
-    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 10)
+    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 10, int multiPv = 1)
     {
         if (!this.IsAvailable) {
             return;
@@ -85,6 +103,12 @@ public class ShogiEngineService : IAsyncDisposable
 
         var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
         this._isAnalyzing = true;
+        this._candidates.Clear();
+
+        // MultiPVを設定
+        if (multiPv > 1) {
+            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
+        }
 
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
     }
@@ -126,27 +150,68 @@ public class ShogiEngineService : IAsyncDisposable
     private void ParseInfoMessage(string message)
     {
         var parts = message.Split(' ');
+        int? multipv = null;
+        int? depth = null;
+        int? score = null;
+        int? mateIn = null;
+        string? pv = null;
+        string? move = null;
 
         for (var i = 0; i < parts.Length; i++) {
             switch (parts[i]) {
-                case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var depth):
-                    this.Depth = depth;
+                case "multipv" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var mpv):
+                    multipv = mpv;
+                    break;
+
+                case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var d):
+                    depth = d;
                     break;
 
                 case "score" when i + 2 < parts.Length:
                     if (parts[i + 1] == "cp" && int.TryParse(parts[i + 2], out var cp)) {
-                        this.Evaluation = cp;
+                        score = cp;
+                        mateIn = null;
                     }
                     else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
                         // 詰み: 正の値は先手勝ち、負の値は後手勝ち
-                        this.Evaluation = mate > 0 ? 30000 - mate : -30000 - mate;
+                        score = mate > 0 ? 30000 - mate : -30000 - mate;
+                        mateIn = mate;
                     }
                     break;
 
                 case "pv" when i + 1 < parts.Length:
-                    this.PrincipalVariation = string.Join(" ", parts.Skip(i + 1));
+                    var pvParts = parts.Skip(i + 1).ToArray();
+                    pv = string.Join(" ", pvParts);
+                    if (pvParts.Length > 0) {
+                        move = pvParts[0];
+                    }
                     break;
             }
+        }
+
+        // メインの評価値を更新（multipv=1または指定なしの場合）
+        if (multipv is null or 1) {
+            if (depth.HasValue) {
+                this.Depth = depth.Value;
+            }
+            if (score.HasValue) {
+                this.Evaluation = score.Value;
+                this.MateIn = mateIn;
+            }
+            if (pv is not null) {
+                this.PrincipalVariation = pv;
+            }
+        }
+
+        // 候補手リストを更新
+        if (multipv.HasValue && move is not null) {
+            this._candidates[multipv.Value] = new CandidateMove(
+                multipv.Value,
+                move,
+                score,
+                mateIn,
+                pv
+            );
         }
     }
 

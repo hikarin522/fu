@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
 using Fu.Core.Models;
+using Fu.Core.Models.Dto;
 using Fu.Core.Services;
 using Fu.Services;
 
@@ -34,10 +35,28 @@ public partial class Index : IAsyncDisposable
     private string SelectedSentePeerId { get; set; } = "";
     private string SelectedGotePeerId { get; set; } = "";
 
+    // 対局者向け評価値表示オプション
+    private bool OptShowAdvantage { get; set; }
+    private bool OptShowEvaluationValue { get; set; }
+    private bool OptShowHasMate { get; set; }
+    private bool OptShowMateCount { get; set; }
+
+    // 現在のゲームに適用されている評価値表示オプション
+    private EvaluationDisplayOptions CurrentEvaluationOptions { get; set; } = new();
+
     // 対局者かどうか
     private bool IsPlayer => this.WebRtcService.MyPeerId == this.SentePeerId ||
                              this.WebRtcService.MyPeerId == this.GotePeerId;
     private bool IsSpectator => !this.IsPlayer && this.GameService.State.Status == GameStatus.Playing;
+
+    // 評価値表示の各要素が有効か（観戦者は常に全表示、対局者はオプション次第）
+    private bool ShowAdvantage => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
+    private bool ShowEvaluationValue => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
+    private bool ShowHasMate => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
+    private bool ShowMateCount => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowMateCount);
+
+    // 評価バー自体を表示するか（何か1つでも有効なら表示）
+    private bool ShowEvaluation => this.ShowAdvantage || this.ShowEvaluationValue || this.ShowHasMate;
 
     protected override async Task OnInitializedAsync()
     {
@@ -89,7 +108,7 @@ public partial class Index : IAsyncDisposable
     }
 
     private Task OnGameStartWithPlayersAsync(GameStartInfo info) =>
-        this.InvokeAsync(() => this.SetupGameAsync(info.SentePeerId, info.GotePeerId, info.SenteNickname, info.GoteNickname));
+        this.InvokeAsync(() => this.SetupGameAsync(info.SentePeerId, info.GotePeerId, info.SenteNickname, info.GoteNickname, info.EvaluationOptions));
 
     private async Task OnMoveMade(Move move)
     {
@@ -107,8 +126,8 @@ public partial class Index : IAsyncDisposable
     {
         await this.InvokeAsync(this.StateHasChanged);
 
-        // 観戦者の場合は評価をリクエスト
-        if (this.IsSpectator && this.EngineService.IsAvailable) {
+        // 評価値表示が有効な場合はリクエスト
+        if (this.ShowEvaluation && this.EngineService.IsAvailable) {
             await this.RequestEvaluationAsync();
         }
     }
@@ -117,6 +136,10 @@ public partial class Index : IAsyncDisposable
     {
         this.SelectedSentePeerId = "";
         this.SelectedGotePeerId = "";
+        this.OptShowAdvantage = false;
+        this.OptShowEvaluationValue = false;
+        this.OptShowHasMate = false;
+        this.OptShowMateCount = false;
         this.ShowNewGameDialog = true;
     }
 
@@ -129,20 +152,28 @@ public partial class Index : IAsyncDisposable
             return;
         }
 
+        var options = new EvaluationDisplayOptions(
+            this.OptShowAdvantage,
+            this.OptShowEvaluationValue,
+            this.OptShowHasMate,
+            this.OptShowMateCount);
+
         await this.SetupGameAsync(
             this.SelectedSentePeerId,
             this.SelectedGotePeerId,
             senteParticipant.Nickname,
-            goteParticipant.Nickname);
-        await this.WebRtcService.SendGameStartAsync(this.SentePeerId!, this.GotePeerId!);
+            goteParticipant.Nickname,
+            options);
+        await this.WebRtcService.SendGameStartAsync(this.SentePeerId!, this.GotePeerId!, options);
     }
 
-    private async Task SetupGameAsync(string sentePeerId, string gotePeerId, string senteNickname, string goteNickname)
+    private async Task SetupGameAsync(string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, EvaluationDisplayOptions? evaluationOptions = null)
     {
         this.SentePeerId = sentePeerId;
         this.GotePeerId = gotePeerId;
         this.SenteNickname = senteNickname;
         this.GoteNickname = goteNickname;
+        this.CurrentEvaluationOptions = evaluationOptions ?? new EvaluationDisplayOptions();
 
         var localPlayer = this.WebRtcService.MyPeerId == sentePeerId ? Player.Sente
             : this.WebRtcService.MyPeerId == gotePeerId ? Player.Gote
@@ -176,7 +207,8 @@ public partial class Index : IAsyncDisposable
                 this.GotePeerId ?? "",
                 this.SenteNickname,
                 this.GoteNickname,
-                this.GameService.State.Status
+                this.GameService.State.Status,
+                this.CurrentEvaluationOptions
             );
         }
     }
@@ -189,6 +221,7 @@ public partial class Index : IAsyncDisposable
             this.GotePeerId = info.GotePeerId;
             this.SenteNickname = info.SenteNickname;
             this.GoteNickname = info.GoteNickname;
+            this.CurrentEvaluationOptions = info.EvaluationOptions ?? new EvaluationDisplayOptions();
 
             // 自分が対局者かどうかを判定
             var localPlayer = this.WebRtcService.MyPeerId == info.SentePeerId ? Player.Sente
@@ -235,7 +268,7 @@ public partial class Index : IAsyncDisposable
 
     private async Task RequestEvaluationAsync()
     {
-        if (!this.IsSpectator || !this.EngineService.IsAvailable) {
+        if (!this.ShowEvaluation || !this.EngineService.IsAvailable) {
             return;
         }
 
@@ -244,12 +277,16 @@ public partial class Index : IAsyncDisposable
             ? this.GameService.GetBoardAtMove(state.DisplayMoveIndex)
             : (state.Board, state.SenteCaptured, state.GoteCaptured, state.CurrentPlayer);
 
+        // 観戦者の場合は候補手を3つ表示
+        var multiPv = this.IsSpectator ? 3 : 1;
+
         await this.EngineService.AnalyzePositionAsync(
             board,
             currentPlayer,
             senteCaptured,
             goteCaptured,
-            depth: 15);
+            depth: 15,
+            multiPv: multiPv);
     }
 
     private async Task DownloadKifAsync()

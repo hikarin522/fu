@@ -16,9 +16,23 @@ public sealed record MoveMessage(MoveDto Move) : WebRtcMessage("move");
 public sealed record GameStartMessage() : WebRtcMessage("gameStart");
 
 /// <summary>
+/// 対局者向け評価値表示オプション
+/// </summary>
+public sealed record EvaluationDisplayOptions(
+    bool ShowAdvantage = false,
+    bool ShowEvaluationValue = false,
+    bool ShowHasMate = false,
+    bool ShowMateCount = false
+);
+
+/// <summary>
 /// 対局者指定付きゲーム開始メッセージ
 /// </summary>
-public sealed record GameStartWithPlayersMessage(string SentePeerId, string GotePeerId) : WebRtcMessage("gameStartWithPlayers");
+public sealed record GameStartWithPlayersMessage(
+    string SentePeerId,
+    string GotePeerId,
+    EvaluationDisplayOptions? EvaluationOptions = null
+) : WebRtcMessage("gameStartWithPlayers");
 
 /// <summary>
 /// 投了メッセージ
@@ -34,7 +48,8 @@ public sealed record GameStateSyncMessage(
     string GotePeerId,
     string SenteNickname,
     string GoteNickname,
-    string Status
+    string Status,
+    EvaluationDisplayOptions? EvaluationOptions = null
 ) : WebRtcMessage("gameStateSync");
 
 /// <summary>

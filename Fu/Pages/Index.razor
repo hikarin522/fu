@@ -64,6 +64,29 @@
                     </select>
                 </div>
 
+                <div class="option-section">
+                    <div class="option-title">対局者への評価表示</div>
+                    <small class="option-hint">※観戦者には常にすべて表示されます</small>
+                    <div class="option-checkboxes">
+                        <label class="checkbox-label">
+                            <input type="checkbox" @bind="OptShowAdvantage" />
+                            優勢表示
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" @bind="OptShowEvaluationValue" />
+                            評価値
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" @bind="OptShowHasMate" />
+                            詰みの有無
+                        </label>
+                        <label class="checkbox-label" style="margin-left: 20px;">
+                            <input type="checkbox" @bind="OptShowMateCount" disabled="@(!OptShowHasMate)" />
+                            詰み手数
+                        </label>
+                    </div>
+                </div>
+
                 <div class="dialog-buttons">
                     <button class="btn primary" @onclick="StartNewGameAsync"
                             disabled="@(string.IsNullOrEmpty(SelectedSentePeerId) || string.IsNullOrEmpty(SelectedGotePeerId) || SelectedSentePeerId == SelectedGotePeerId)">
@@ -103,7 +126,16 @@
                 @if (IsSpectator)
                 {
                     <div class="spectator-notice">観戦中</div>
-                    <EvaluationBar EngineService="EngineService" />
+                }
+                @if (ShowEvaluation)
+                {
+                    <EvaluationBar
+                        EngineService="EngineService"
+                        ShowAdvantage="ShowAdvantage"
+                        ShowEvaluationValue="ShowEvaluationValue"
+                        ShowHasMate="ShowHasMate"
+                        ShowMateCount="ShowMateCount"
+                        ShowCandidates="IsSpectator" />
                 }
 
                 <div class="game-controls">

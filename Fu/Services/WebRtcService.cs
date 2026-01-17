@@ -78,8 +78,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public Task SendMoveAsync(Move move) =>
         this.SendMessageAsync(new MoveMessage(move.ToDto()));
 
-    public Task SendGameStartAsync(string sentePeerId, string gotePeerId) =>
-        this.SendMessageAsync(new GameStartWithPlayersMessage(sentePeerId, gotePeerId));
+    public Task SendGameStartAsync(string sentePeerId, string gotePeerId, EvaluationDisplayOptions? evaluationOptions = null) =>
+        this.SendMessageAsync(new GameStartWithPlayersMessage(sentePeerId, gotePeerId, evaluationOptions));
 
     public Task SendGameStartAsync() =>
         this.SendMessageAsync(new GameStartMessage());
@@ -90,14 +90,15 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public Task SendGameStateRequestAsync() =>
         this.SendMessageAsync(new GameStateRequestMessage());
 
-    public Task SendGameStateSyncAsync(IEnumerable<Move> moveHistory, string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, GameStatus status) =>
+    public Task SendGameStateSyncAsync(IEnumerable<Move> moveHistory, string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, GameStatus status, EvaluationDisplayOptions? evaluationOptions = null) =>
         this.SendMessageAsync(new GameStateSyncMessage(
             moveHistory.Select(m => m.ToDto()).ToArray(),
             sentePeerId,
             gotePeerId,
             senteNickname,
             goteNickname,
-            status.ToString()
+            status.ToString(),
+            evaluationOptions
         ));
 
     public Task SendBranchResumeAsync(IEnumerable<Move> moveHistory) =>
@@ -199,7 +200,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                     if (gsMessage is not null && OnGameStartWithPlayers is { } gsHandler) {
                         var senteNickname = this._participants.GetValueOrDefault(gsMessage.SentePeerId)?.Nickname ?? "先手";
                         var goteNickname = this._participants.GetValueOrDefault(gsMessage.GotePeerId)?.Nickname ?? "後手";
-                        await gsHandler(new GameStartInfo(gsMessage.SentePeerId, gsMessage.GotePeerId, senteNickname, goteNickname));
+                        await gsHandler(new GameStartInfo(gsMessage.SentePeerId, gsMessage.GotePeerId, senteNickname, goteNickname, gsMessage.EvaluationOptions));
                     }
                     break;
 
@@ -226,7 +227,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                             syncMessage.GotePeerId,
                             syncMessage.SenteNickname,
                             syncMessage.GoteNickname,
-                            status
+                            status,
+                            syncMessage.EvaluationOptions
                         ));
                     }
                     break;
@@ -264,7 +266,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 }
 
 /// <summary>対局開始情報</summary>
-public record GameStartInfo(string SentePeerId, string GotePeerId, string SenteNickname, string GoteNickname);
+public record GameStartInfo(string SentePeerId, string GotePeerId, string SenteNickname, string GoteNickname, EvaluationDisplayOptions? EvaluationOptions);
 
 /// <summary>ゲーム状態同期情報</summary>
 public record GameStateSyncInfo(
@@ -273,5 +275,6 @@ public record GameStateSyncInfo(
     string GotePeerId,
     string SenteNickname,
     string GoteNickname,
-    GameStatus Status
+    GameStatus Status,
+    EvaluationDisplayOptions? EvaluationOptions
 );
