@@ -6,11 +6,13 @@ const APP_ID = 'fu-shogi-game';
 
 let room = null;
 let dotNetRef = null;
-let myPeerId = null;
+let myPeerId = null;  // Trysteroが割り当てる自分のpeer ID（最初の接続時に判明）
 let isHost = false;
 let myNickname = '';
 let currentRoomId = null;
 let participants = new Map(); // peerId -> { nickname, isHost }
+let trysteroToDotNetId = new Map(); // Trystero peerId -> 我々が使うID（ニックネームベース）
+let pendingSelfId = null; // 自分のID（接続前に生成）
 
 // Trystero actions (names must be <= 12 bytes)
 let sendMessage = null;
@@ -28,7 +30,9 @@ window.WebRtc = {
         myNickname = nickname;
         isHost = true;
         currentRoomId = generateRoomId();
-        myPeerId = generatePeerId();
+        // 自分のIDはニックネームベースで生成（一意性のためにランダム文字列を付加）
+        pendingSelfId = generateDotNetId(nickname);
+        myPeerId = pendingSelfId;
 
         if (dotNetRef) {
             dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
@@ -36,7 +40,7 @@ window.WebRtc = {
 
         await joinTrysteroRoom(currentRoomId);
 
-        console.log('Room created with ID:', currentRoomId);
+        console.log('Room created with ID:', currentRoomId, 'My ID:', myPeerId);
         return currentRoomId;
     },
 
@@ -45,7 +49,9 @@ window.WebRtc = {
         myNickname = nickname;
         isHost = false;
         currentRoomId = roomId;
-        myPeerId = generatePeerId();
+        // 自分のIDはニックネームベースで生成
+        pendingSelfId = generateDotNetId(nickname);
+        myPeerId = pendingSelfId;
 
         if (dotNetRef) {
             dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
@@ -53,7 +59,7 @@ window.WebRtc = {
 
         await joinTrysteroRoom(roomId);
 
-        console.log('Joining room:', roomId);
+        console.log('Joining room:', roomId, 'My ID:', myPeerId);
         return true;
     },
 
@@ -104,7 +110,9 @@ window.WebRtc = {
         sendPeerInfo = null;
         sendPeerLeft = null;
         participants.clear();
+        trysteroToDotNetId.clear();
         myPeerId = null;
+        pendingSelfId = null;
         isHost = false;
         myNickname = '';
         currentRoomId = null;
@@ -138,53 +146,67 @@ async function joinTrysteroRoom(roomId) {
     });
 
     // 参加者情報受信ハンドラ
-    onPI((data, peerId) => {
-        console.log('Peer info received from', peerId, ':', data);
+    onPI((data, tryseteroPeerId) => {
+        console.log('Peer info received from', tryseteroPeerId, ':', data);
         const info = JSON.parse(data);
-        if (!participants.has(peerId)) {
-            participants.set(peerId, { nickname: info.nickname, isHost: info.isHost });
+        // 相手が送ってきた自己申告のIDを使用する
+        const dotNetId = info.id;
+
+        if (!trysteroToDotNetId.has(tryseteroPeerId)) {
+            trysteroToDotNetId.set(tryseteroPeerId, dotNetId);
+            participants.set(dotNetId, { nickname: info.nickname, isHost: info.isHost });
+            console.log('Mapped Trystero ID', tryseteroPeerId, 'to DotNet ID', dotNetId);
             if (dotNetRef) {
-                dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', peerId, info.nickname, info.isHost);
+                dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', dotNetId, info.nickname, info.isHost);
             }
         }
     });
 
     // 参加者退出受信ハンドラ
-    onPL((data, peerId) => {
-        console.log('Peer left:', peerId);
-        participants.delete(peerId);
-        if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', peerId);
+    onPL((data, tryseteroPeerId) => {
+        console.log('Peer left (Trystero ID):', tryseteroPeerId);
+        const dotNetId = trysteroToDotNetId.get(tryseteroPeerId);
+        if (dotNetId) {
+            participants.delete(dotNetId);
+            trysteroToDotNetId.delete(tryseteroPeerId);
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
+            }
         }
     });
 
     // ピア参加ハンドラ
-    room.onPeerJoin(peerId => {
-        console.log('Peer joined:', peerId);
+    room.onPeerJoin(tryseteroPeerId => {
+        console.log('Peer joined (Trystero ID):', tryseteroPeerId);
 
-        // 自分の情報を送信
+        // 自分の情報を送信（自己申告のIDを含める）
         sendPeerInfo(JSON.stringify({
+            id: myPeerId,
             nickname: myNickname,
             isHost: isHost
         }));
 
-        // 接続状態を更新
+        // 接続状態を更新（自分を含めて2人になったら接続完了）
         if (dotNetRef && participants.size === 1) {
             dotNetRef.invokeMethodAsync('OnDataChannelOpen');
         }
     });
 
     // ピア退出ハンドラ
-    room.onPeerLeave(peerId => {
-        console.log('Peer left:', peerId);
-        const participant = participants.get(peerId);
-        participants.delete(peerId);
+    room.onPeerLeave(tryseteroPeerId => {
+        console.log('Peer left (Trystero ID):', tryseteroPeerId);
+        const dotNetId = trysteroToDotNetId.get(tryseteroPeerId);
 
-        if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', peerId);
+        if (dotNetId) {
+            participants.delete(dotNetId);
+            trysteroToDotNetId.delete(tryseteroPeerId);
 
-            if (participants.size <= 1) {
-                dotNetRef.invokeMethodAsync('OnDataChannelClose');
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
+
+                if (participants.size <= 1) {
+                    dotNetRef.invokeMethodAsync('OnDataChannelClose');
+                }
             }
         }
     });
@@ -207,8 +229,10 @@ function generateRoomId() {
     return result;
 }
 
-function generatePeerId() {
-    return 'peer_' + Math.random().toString(36).substring(2, 11);
+function generateDotNetId(nickname) {
+    // ニックネーム + ランダム文字列で一意性を確保
+    const randomPart = Math.random().toString(36).substring(2, 8);
+    return `${nickname}_${randomPart}`;
 }
 
 // Nickname storage
