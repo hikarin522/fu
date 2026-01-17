@@ -66,6 +66,11 @@ public partial class Index : IAsyncDisposable
     private bool ShowEvaluation => this.ShowAdvantage || this.ShowEvaluationValue || this.ShowHasMate;
     private bool ShowCandidateArrows => this.CanShowAllEvaluation;
 
+    // 評価表示用の盤面（検討モード時は表示中の盤面）
+    private Board DisplayBoard => this.GameService.State.IsReviewing
+        ? this.GameService.GetBoardAtMove(this.GameService.State.DisplayMoveIndex).Board
+        : this.GameService.State.Board;
+
     // Cross-Origin Isolationのリロードが必要かどうか
     private bool NeedsReload { get; set; }
 

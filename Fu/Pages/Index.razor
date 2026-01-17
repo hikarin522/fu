@@ -153,7 +153,8 @@
                         ShowHasMate="ShowHasMate"
                         ShowMateCount="ShowMateCount"
                         ShowCandidates="ShowCandidateArrows"
-                        ShowMateSequence="CanShowAllEvaluation" />
+                        ShowMateSequence="CanShowAllEvaluation"
+                        Board="DisplayBoard" />
                 }
 
                 <div class="game-controls">
@@ -191,7 +192,7 @@
                 var move = GameService.State.MoveHistory[i];
                 var index = i;
                 var isViewing = GameService.State.DisplayMoveIndex == i + 1;
-                <span class="move-entry @(isViewing ? "viewing" : "")" @onclick="() => GoToMoveAsync(index + 1)">@((i + 1)). @move.ToNotation()</span>
+                <span class="move-entry @(isViewing ? "viewing" : "")" @onclick="() => GoToMoveAsync(index + 1)">@((i + 1)). @move.ToNotationWithFrom()</span>
             }
         </div>
     </div>

@@ -27,6 +27,11 @@ public sealed record Move(
         ? $"{this.To.ToNotation()}{this.PieceType.GetCapturedChar()}打"
         : $"{this.To.ToNotation()}{this.PieceType.GetCapturedChar()}{(this.IsPromotion ? "成" : "")}";
 
+    /// <summary>移動元付き棋譜表記 (例: 7六歩(77)、7六歩成(67)、7六歩打)</summary>
+    public string ToNotationWithFrom() => this.IsDrop
+        ? $"{this.To.ToNotation()}{this.PieceType.GetCapturedChar()}打"
+        : $"{this.To.ToNotation()}{this.PieceType.GetCapturedChar()}{(this.IsPromotion ? "成" : "")}{(this.From is { } f ? $"({9 - f.Col}{f.Row + 1})" : "")}";
+
     /// <summary>取った駒を設定した新しいインスタンスを返す</summary>
     public Move WithCapturedPiece(PieceType capturedPiece) =>
         this with { CapturedPiece = capturedPiece };
