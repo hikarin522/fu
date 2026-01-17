@@ -74,6 +74,9 @@ public partial class Index : IAsyncDisposable
     // Cross-Origin Isolationのリロードが必要かどうか
     private bool NeedsReload { get; set; }
 
+    // 通知音設定
+    private bool SoundEnabled { get; set; } = true;
+
     protected override async Task OnInitializedAsync()
     {
         try {
@@ -84,6 +87,10 @@ public partial class Index : IAsyncDisposable
             }
 
             await this.WebRtcService.InitializeAsync();
+
+            // 通知音設定を読み込み
+            this.SoundEnabled = await this.LoadSoundSettingAsync();
+
             this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceivedAsync;
             this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
             this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
@@ -148,11 +155,42 @@ public partial class Index : IAsyncDisposable
 
     private async Task PlayTurnNotificationAsync()
     {
+        if (!this.SoundEnabled) {
+            return;
+        }
+
         try {
             await this.JS.InvokeVoidAsync("TurnNotification.play");
         }
         catch {
             // 音声再生に失敗しても無視
+        }
+    }
+
+    private async Task ToggleSoundAsync()
+    {
+        this.SoundEnabled = !this.SoundEnabled;
+        await this.SaveSoundSettingAsync(this.SoundEnabled);
+    }
+
+    private async Task<bool> LoadSoundSettingAsync()
+    {
+        try {
+            var value = await this.JS.InvokeAsync<string?>("SoundSettings.load");
+            return value != "false"; // デフォルトはtrue
+        }
+        catch {
+            return true;
+        }
+    }
+
+    private async Task SaveSoundSettingAsync(bool enabled)
+    {
+        try {
+            await this.JS.InvokeVoidAsync("SoundSettings.save", enabled ? "true" : "false");
+        }
+        catch {
+            // 保存失敗は無視
         }
     }
 

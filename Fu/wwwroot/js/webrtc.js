@@ -305,3 +305,24 @@ window.TurnNotification = {
         }
     }
 };
+
+// Sound settings storage
+const SOUND_SETTINGS_KEY = 'fu_sound_enabled';
+
+window.SoundSettings = {
+    save: function (value) {
+        try {
+            localStorage.setItem(SOUND_SETTINGS_KEY, value);
+        } catch (e) {
+            console.warn('Failed to save sound setting to localStorage:', e);
+        }
+    },
+    load: function () {
+        try {
+            return localStorage.getItem(SOUND_SETTINGS_KEY);
+        } catch (e) {
+            console.warn('Failed to load sound setting from localStorage:', e);
+            return null;
+        }
+    }
+};
