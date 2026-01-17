@@ -79,7 +79,7 @@ jobs:
           boot_config = {
               "mainAssemblyName": "Fu",
               "resources": resources,
-              "cacheBootResources": True,
+              "cacheBootResources": False,
               "debugLevel": 0
           }
 
