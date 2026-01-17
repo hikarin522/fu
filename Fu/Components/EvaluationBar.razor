@@ -27,8 +27,9 @@
             }
             @if (ShowEvaluationValue)
             {
-                <div class="evaluation-value @(EvaluationClass)">
+                <div class="evaluation-value @(EvaluationClass)" title="@EvaluationHelp">
                     @EvaluationText
+                    <span class="help-icon" title="@EvaluationGuide">?</span>
                 </div>
             }
             @if (ShowHasMate && EngineService.MateIn is { } mate)
@@ -50,6 +51,19 @@
                         <span class="mate-sequence-moves">@FormatMateSequence(EngineService.PrincipalVariation)</span>
                     </div>
                 }
+            }
+            else if (ShowHasMate && EngineService.IsThreatening)
+            {
+                <div class="threatening-info" title="相手が受けなければ次に詰む状態">
+                    @if (ShowMateCount && EngineService.ThreateningMateIn is { } threatMate)
+                    {
+                        <span>詰めろ (@(threatMate)手)</span>
+                    }
+                    else
+                    {
+                        <span>詰めろ</span>
+                    }
+                </div>
             }
             @if (ShowCandidates && EngineService.Candidates.Count > 0)
             {
@@ -129,6 +143,27 @@
         < -29000 => "後手勝ち",
         { } e => FormatPawnValue(e, "F1")
     };
+
+    private string EvaluationHelp => Eval switch {
+        null => "",
+        > 29000 or < -29000 => "詰みが確定している状態",
+        > 2000 or < -2000 => "ほぼ勝ち/負けが決まっている状態",
+        > 1000 or < -1000 => "大きく有利/不利な状態",
+        > 500 or < -500 => "かなり有利/不利な状態",
+        > 300 or < -300 => "有利/不利な状態",
+        > 100 or < -100 => "やや有利/不利な状態",
+        _ => "ほぼ互角の状態"
+    };
+
+    private const string EvaluationGuide = @"【評価値の目安】
+±0.0〜1.0: ほぼ互角
+±1.0〜3.0: やや有利
+±3.0〜5.0: 有利
+±5.0〜10.0: かなり有利
+±10.0〜20.0: 優勢〜勝勢
+±20.0以上: ほぼ勝ち確定
+
+※1.0 ≒ 歩1枚分の価値";
 
     private static string FormatPawnValue(int centipawn, string format)
     {

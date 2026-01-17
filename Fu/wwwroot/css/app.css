@@ -962,6 +962,33 @@ a, .btn-link {
     color: #666;
 }
 
+.evaluation-value {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 11px;
+    font-weight: bold;
+    background: #888;
+    color: white;
+    border-radius: 50%;
+    cursor: help;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.help-icon:hover {
+    opacity: 1;
+    background: #555;
+}
+
 .advantage-indicator {
     font-size: 14px;
     font-weight: bold;
@@ -1011,6 +1038,18 @@ a, .btn-link {
 .mate-info.gote-mate {
     background: #fce4ec;
     color: #c62828;
+}
+
+.threatening-info {
+    font-size: 12px;
+    font-weight: bold;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    background: #fff3e0;
+    color: #e65100;
+    border: 1px solid #ffb74d;
+    cursor: help;
 }
 
 .mate-sequence {

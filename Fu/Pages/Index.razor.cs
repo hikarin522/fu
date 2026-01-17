@@ -308,12 +308,14 @@ public partial class Index : IAsyncDisposable
         var multiPv = this.ShowCandidateArrows ? 3 : 1;
 
         // depth: 0 = 無限探索（局面が変わるまで継続）
+        // 詰み表示が有効な場合は詰めろチェックも行う
         await this.EngineService.AnalyzePositionAsync(
             board,
             currentPlayer,
             senteCaptured,
             goteCaptured,
-            multiPv: multiPv);
+            multiPv: multiPv,
+            checkThreatening: this.ShowHasMate);
     }
 
     private void ToggleBoardFlip()

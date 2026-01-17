@@ -49,6 +49,12 @@ public class ShogiEngineService : IAsyncDisposable
     /// <summary>詰み手数（正:先手勝ち、負:後手勝ち、null:詰みなし）</summary>
     public int? MateIn { get; private set; }
 
+    /// <summary>詰めろ状態（相手が受けなければ次に詰む）</summary>
+    public bool IsThreatening { get; private set; }
+
+    /// <summary>詰めろの詰み手数</summary>
+    public int? ThreateningMateIn { get; private set; }
+
     /// <summary>最善手</summary>
     public string? BestMove { get; private set; }
 
@@ -113,7 +119,7 @@ public class ShogiEngineService : IAsyncDisposable
 
     /// <summary>局面を分析</summary>
     /// <param name="depth">探索深さ（0 = 無限探索）</param>
-    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 0, int multiPv = 1)
+    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 0, int multiPv = 1, bool checkThreatening = false)
     {
         if (!this.IsAvailable) {
             return;
@@ -121,6 +127,12 @@ public class ShogiEngineService : IAsyncDisposable
 
         var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
         this._currentSfen = sfen;
+
+        // 詰めろチェックをリセット
+        if (!this._isCheckingThreatening) {
+            this.IsThreatening = false;
+            this.ThreateningMateIn = null;
+        }
 
         // キャッシュをチェック
         if (this._cache.TryGetValue(sfen, out var cached)) {
@@ -131,6 +143,10 @@ public class ShogiEngineService : IAsyncDisposable
             }
             // 無限探索の場合は継続、深さ指定の場合はキャッシュ深さ以上ならスキップ
             if (depth > 0 && cached.Depth >= depth) {
+                // 詰めろチェックが有効で、まだ詰みがない場合は相手番で分析
+                if (checkThreatening && !this._isCheckingThreatening && this.MateIn is null) {
+                    await this.CheckThreateningAsync(board, currentPlayer, senteCaptured, goteCaptured);
+                }
                 return;
             }
         }
@@ -145,12 +161,38 @@ public class ShogiEngineService : IAsyncDisposable
         }
 
         this._isAnalyzing = true;
+        this._checkThreateningAfterAnalysis = checkThreatening;
+        this._threateningContext = checkThreatening ? (board, currentPlayer, senteCaptured, goteCaptured) : null;
 
         // MultiPVを設定（常に送信して状態を確実に同期）
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
 
         // depth=0 で無限探索
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
+    }
+
+    // 詰めろチェック用のフラグ
+    private bool _isCheckingThreatening;
+    private bool _checkThreateningAfterAnalysis;
+    private (Board board, Player player, CapturedPieces sente, CapturedPieces gote)? _threateningContext;
+    private string? _threateningSfen;
+
+    /// <summary>詰めろをチェック（相手番として分析）</summary>
+    private async Task CheckThreateningAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
+    {
+        if (!this.IsAvailable || this._isCheckingThreatening) {
+            return;
+        }
+
+        // 相手番として局面を生成
+        var opponentPlayer = currentPlayer == Player.Sente ? Player.Gote : Player.Sente;
+        var sfen = ToSfen(board, opponentPlayer, senteCaptured, goteCaptured);
+        this._threateningSfen = sfen;
+        this._isCheckingThreatening = true;
+
+        // 浅い探索で詰みがあるかチェック（詰み探索用に深さ15程度）
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "setoption name MultiPV value 1");
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, 15);
     }
 
     private void RestoreFromCache(CachedEvaluation cached)
@@ -209,26 +251,59 @@ public class ShogiEngineService : IAsyncDisposable
     {
         // USIプロトコルのメッセージをパース
         if (message.StartsWith("info ", StringComparison.Ordinal)) {
-            this.ParseInfoMessage(message);
+            if (this._isCheckingThreatening) {
+                // 詰めろチェック中のメッセージを処理
+                this.ParseThreateningInfoMessage(message);
+            }
+            else {
+                this.ParseInfoMessage(message);
+            }
             if (OnEvaluationUpdated is { } handler) {
                 await handler();
             }
         }
         else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
-            var parts = message.Split(' ');
-            if (parts.Length >= 2) {
-                this.BestMove = parts[1];
+            if (this._isCheckingThreatening) {
+                // 詰めろチェック完了
+                this._isCheckingThreatening = false;
+                this._threateningSfen = null;
             }
-            this._isAnalyzing = false;
+            else {
+                var parts = message.Split(' ');
+                if (parts.Length >= 2) {
+                    this.BestMove = parts[1];
+                }
+                this._isAnalyzing = false;
 
-            // 探索完了時にキャッシュに保存
-            if (this._currentSfen is not null) {
-                this.SaveToCache(this._currentSfen);
+                // 探索完了時にキャッシュに保存
+                if (this._currentSfen is not null) {
+                    this.SaveToCache(this._currentSfen);
+                }
+
+                // 詰めろチェックが有効で、詰みがない場合は相手番で分析
+                if (this._checkThreateningAfterAnalysis && this.MateIn is null && this._threateningContext is { } ctx) {
+                    this._checkThreateningAfterAnalysis = false;
+                    await this.CheckThreateningAsync(ctx.board, ctx.player, ctx.sente, ctx.gote);
+                }
+                this._threateningContext = null;
             }
 
             if (OnEvaluationUpdated is { } handler) {
                 await handler();
             }
+        }
+    }
+
+    private void ParseThreateningInfoMessage(string message)
+    {
+        var parts = message.Split(' ');
+        var info = ParseUsiInfo(parts);
+
+        // 相手番で詰みが見つかった場合、詰めろ
+        if (info.MateIn.HasValue && info.MateIn.Value > 0) {
+            // 相手から見て詰みがある = 自分が詰めろをかけている
+            this.IsThreatening = true;
+            this.ThreateningMateIn = info.MateIn.Value;
         }
     }
 
