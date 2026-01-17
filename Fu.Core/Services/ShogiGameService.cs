@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Diagnostics;
 
 using Fu.Core.Models;
 
@@ -9,6 +10,9 @@ public class ShogiGameService
 {
     private const int SentePromotionBoundary = 2;  // 先手の成れる段（0-2）
     private const int GotePromotionBoundary = 6;   // 後手の成れる段（6-8）
+
+    private readonly Stopwatch _turnStopwatch = new();
+    private DateTime _gameStartTime;
 
     public GameState State { get; private set; } = GameState.Initial;
 
@@ -35,9 +39,27 @@ public class ShogiGameService
         this.State = GameState.Initial with {
             Status = GameStatus.Playing,
             LocalPlayer = localPlayer,
-            MoveTree = new MoveTree()
+            MoveTree = new MoveTree(),
+            MoveTimes = []
         };
+        this.StartTurnTimer();
         await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>手番タイマーを開始</summary>
+    private void StartTurnTimer()
+    {
+        this._gameStartTime = DateTime.Now;
+        this._turnStopwatch.Restart();
+    }
+
+    /// <summary>手番タイマーを停止して経過時間を取得</summary>
+    private TimeSpan StopTurnTimer()
+    {
+        this._turnStopwatch.Stop();
+        var elapsed = this._turnStopwatch.Elapsed;
+        this._turnStopwatch.Restart();
+        return elapsed;
     }
 
     public async Task SetLocalPlayerAsync(Player player)
@@ -182,10 +204,12 @@ public class ShogiGameService
             moveToRecord = move.WithCapturedPiece(captured.Type);
 
             if (captured.Type == PieceType.King) {
+                var kingCaptureTime = this.StopTurnTimer();
                 this.State.MoveTree.AddMove(moveToRecord);
                 this.State = this.State with {
                     Board = this.State.Board.MovePiece(from, to),
                     MoveHistory = this.State.MoveHistory.Add(moveToRecord),
+                    MoveTimes = this.State.Times.Add(kingCaptureTime),
                     Status = this.State.CurrentPlayer.GetWinStatus()
                 };
                 this.State = this.State.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
@@ -194,6 +218,7 @@ public class ShogiGameService
             }
         }
 
+        var moveTime = this.StopTurnTimer();
         var newPiece = move.IsPromotion && piece.Type.CanPromote()
             ? piece with { Type = piece.Type.GetPromotedType() }
             : piece;
@@ -203,6 +228,7 @@ public class ShogiGameService
         var newState = this.State with {
             Board = this.State.Board.MovePiece(from, to, newPiece),
             MoveHistory = this.State.MoveHistory.Add(moveToRecord),
+            MoveTimes = this.State.Times.Add(moveTime),
             ViewingMoveIndex = null
         };
         newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
@@ -263,11 +289,13 @@ public class ShogiGameService
             return false;
         }
 
+        var moveTime = this.StopTurnTimer();
         this.State.MoveTree.AddMove(move);
 
         var newState = this.State with {
             Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, this.State.CurrentPlayer)),
             MoveHistory = this.State.MoveHistory.Add(move),
+            MoveTimes = this.State.Times.Add(moveTime),
             ViewingMoveIndex = null
         };
         newState = newState.WithCapturedPieces(this.State.CurrentPlayer, newCaptured);
@@ -311,6 +339,7 @@ public class ShogiGameService
             null
         ) { MoveTree = moveTree };
 
+        this.StartTurnTimer();
         await this.NotifyStateChangedAsync();
     }
 
@@ -514,6 +543,11 @@ public class ShogiGameService
             null
         ) { MoveTree = moveTree };
 
+        // 対局中なら手番タイマーを開始
+        if (status == GameStatus.Playing) {
+            this.StartTurnTimer();
+        }
+
         await this.NotifyStateChangedAsync();
     }
 
@@ -660,12 +694,14 @@ public class ShogiGameService
             GoteCaptured = goteCaptured,
             CurrentPlayer = currentPlayer,
             MoveHistory = newHistory,
+            MoveTimes = [],  // 時間情報はリセット
             Status = GameStatus.Playing,
             ViewingMoveIndex = null,
             ViewingBranchHistory = null,
             MoveTree = newMoveTree
         };
 
+        this.StartTurnTimer();
         await this.NotifyStateChangedAsync();
     }
 
@@ -690,9 +726,11 @@ public class ShogiGameService
             [.. moveHistory],
             localPlayer,
             null,
-            null
+            null,
+            []  // 時間情報はリセット
         ) { MoveTree = newMoveTree };
 
+        this.StartTurnTimer();
         await this.NotifyStateChangedAsync();
     }
 

@@ -113,6 +113,10 @@ a, .btn-link {
     background: #fff;
     border-radius: 4px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-width: 300px;
 }
 
 .player-info.self {
@@ -122,6 +126,15 @@ a, .btn-link {
 .player-label {
     font-weight: bold;
     color: #333;
+}
+
+.player-time {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 1.1rem;
+    color: #555;
+    background: #f5f5f5;
+    padding: 4px 8px;
+    border-radius: 4px;
 }
 
 /* 将棋盤 */

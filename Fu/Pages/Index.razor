@@ -116,6 +116,9 @@
                         @(IsFlipped ? SenteNickname : GoteNickname)
                         (@(IsFlipped ? "先手" : "後手"))
                     </span>
+                    <span class="player-time">
+                        @FormatTime(IsFlipped ? GameService.State.SenteTotalTime : GameService.State.GoteTotalTime)
+                    </span>
                 </div>
 
                 <ShogiBoard
@@ -134,6 +137,9 @@
                         {
                             <span>(あなた)</span>
                         }
+                    </span>
+                    <span class="player-time">
+                        @FormatTime(IsFlipped ? GameService.State.GoteTotalTime : GameService.State.SenteTotalTime)
                     </span>
                 </div>
 

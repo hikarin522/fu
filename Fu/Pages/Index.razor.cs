@@ -410,11 +410,14 @@ public partial class Index : IAsyncDisposable
 
     private async Task DownloadKifAsync()
     {
+        // 選択中のブランチの棋譜をダウンロード
+        var moves = this.GameService.State.DisplayBranchHistory;
         var kif = KifExporter.Export(
-            this.GameService.State.MoveHistory,
+            moves,
             this.GameService.State.Status,
             this.SenteNickname,
-            this.GoteNickname);
+            this.GoteNickname,
+            this.GameService.State.Times);
         var fileName = $"shogi_{DateTime.Now:yyyyMMdd_HHmmss}.kif";
         await this.JS.InvokeVoidAsync("downloadTextFile", fileName, kif);
     }
@@ -501,6 +504,14 @@ public partial class Index : IAsyncDisposable
             this.NeedsReload = true;
             await this.JS.InvokeVoidAsync("location.reload");
         }
+    }
+
+    private static string FormatTime(TimeSpan time)
+    {
+        if (time.TotalHours >= 1) {
+            return $"{(int)time.TotalHours}:{time.Minutes:D2}:{time.Seconds:D2}";
+        }
+        return $"{time.Minutes}:{time.Seconds:D2}";
     }
 
     public async ValueTask DisposeAsync()

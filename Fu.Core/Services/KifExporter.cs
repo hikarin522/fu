@@ -11,7 +11,12 @@ public static class KifExporter
     private static readonly string[] RowKanji = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
     private static readonly string[] ColKanji = ["９", "８", "７", "６", "５", "４", "３", "２", "１"];
 
-    public static string Export(ImmutableList<Move> moves, GameStatus status, string senteNickname = "", string goteNickname = "")
+    public static string Export(
+        ImmutableList<Move> moves,
+        GameStatus status,
+        string senteNickname = "",
+        string goteNickname = "",
+        ImmutableList<TimeSpan>? moveTimes = null)
     {
         var sb = new StringBuilder();
 
@@ -26,12 +31,30 @@ public static class KifExporter
         sb.AppendLine("手数----指手---------消費時間--");
 
         Position? lastTo = null;
+        var senteTotalTime = TimeSpan.Zero;
+        var goteTotalTime = TimeSpan.Zero;
+
         for (var i = 0; i < moves.Count; i++) {
             var move = moves[i];
             var moveNumber = i + 1;
             var notation = FormatMove(move, lastTo);
-            // KIF標準形式: "   1 ７六歩(77)"（手数は右寄せ4桁、スペース、指し手）
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{moveNumber,4} {notation}");
+
+            // 時間情報
+            var timeStr = "";
+            if (moveTimes is not null && i < moveTimes.Count) {
+                var moveTime = moveTimes[i];
+                var isSente = i % 2 == 0;
+                if (isSente) {
+                    senteTotalTime += moveTime;
+                } else {
+                    goteTotalTime += moveTime;
+                }
+                var totalTime = isSente ? senteTotalTime : goteTotalTime;
+                timeStr = $"   ({FormatKifTime(moveTime)}/{FormatKifTime(totalTime)})";
+            }
+
+            // KIF標準形式: "   1 ７六歩(77)   (00:01/00:01:23)"
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{moveNumber,4} {notation}{timeStr}");
             lastTo = move.To;
         }
 
@@ -42,6 +65,14 @@ public static class KifExporter
         }
 
         return sb.ToString();
+    }
+
+    private static string FormatKifTime(TimeSpan time)
+    {
+        if (time.TotalHours >= 1) {
+            return $"{(int)time.TotalHours:D2}:{time.Minutes:D2}:{time.Seconds:D2}";
+        }
+        return $"{time.Minutes:D2}:{time.Seconds:D2}";
     }
 
     private static string FormatMove(Move move, Position? lastTo)

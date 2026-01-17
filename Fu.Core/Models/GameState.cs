@@ -82,10 +82,14 @@ public record GameState(
     ImmutableList<Move> MoveHistory,
     Player LocalPlayer,
     int? ViewingMoveIndex = null,
-    ImmutableList<Move>? ViewingBranchHistory = null)
+    ImmutableList<Move>? ViewingBranchHistory = null,
+    ImmutableList<TimeSpan>? MoveTimes = null)
 {
     /// <summary>棋譜ツリー（分岐対応）</summary>
     public MoveTree MoveTree { get; init; } = new();
+
+    /// <summary>各手の消費時間リスト</summary>
+    public ImmutableList<TimeSpan> Times => this.MoveTimes ?? [];
 
     public static GameState Initial => new(
         new Board(),
@@ -135,4 +139,14 @@ public record GameState(
         player == Player.Sente
             ? this with { SenteCaptured = captured }
             : this with { GoteCaptured = captured };
+
+    /// <summary>先手の累計消費時間</summary>
+    public TimeSpan SenteTotalTime => this.Times
+        .Where((_, i) => i % 2 == 0)  // 0, 2, 4, ... は先手
+        .Aggregate(TimeSpan.Zero, (sum, t) => sum + t);
+
+    /// <summary>後手の累計消費時間</summary>
+    public TimeSpan GoteTotalTime => this.Times
+        .Where((_, i) => i % 2 == 1)  // 1, 3, 5, ... は後手
+        .Aggregate(TimeSpan.Zero, (sum, t) => sum + t);
 }
