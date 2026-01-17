@@ -47,6 +47,7 @@ public class ShogiEngineService : IAsyncDisposable
     private Player _currentPlayer = Player.Sente; // 現在分析中の手番
     private int _analysisVersion; // 分析バージョン（古い結果を無視するため）
     private int _currentAnalysisVersion; // 現在処理中の分析バージョン
+    private int _threateningVersion; // 詰めろチェックバージョン（中断された詰めろチェックの結果を無視するため）
 
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
@@ -148,6 +149,9 @@ public class ShogiEngineService : IAsyncDisposable
         if (this._isCheckingThreatening) {
             this._isCheckingThreatening = false;
             this._threateningSfen = null;
+            this._threateningVersion++; // 中断された詰めろチェックの結果を無視するため
+            // エンジンを停止して詰めろチェックの結果を破棄
+            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
         }
 
         // 詰めろチェックをリセット（新しい局面では常にリセット）
@@ -213,6 +217,7 @@ public class ShogiEngineService : IAsyncDisposable
         var sfen = ToSfen(board, opponentPlayer, senteCaptured, goteCaptured);
         this._threateningSfen = sfen;
         this._isCheckingThreatening = true;
+        this._currentThreateningVersion = this._threateningVersion; // バージョンを同期
 
         // 浅い探索で詰みがあるかチェック（詰み探索用に深さ15程度）
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "setoption name MultiPV value 1");
@@ -318,22 +323,34 @@ public class ShogiEngineService : IAsyncDisposable
         }
     }
 
+    private int _currentThreateningVersion; // 現在処理中の詰めろチェックバージョン
+
     private void ParseThreateningInfoMessage(string message)
     {
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
+
+        // 中断された詰めろチェックの結果は無視
+        if (this._currentThreateningVersion != this._threateningVersion) {
+            return;
+        }
 
         // 本局面で既に詰みがある場合は詰めろを設定しない
         if (this.MateIn.HasValue) {
             return;
         }
 
-        // 相手番で詰みが見つかった場合、元の手番側に詰めろがかかっている
+        // 詰みが見つかった場合
         if (info.MateIn.HasValue && info.MateIn.Value > 0) {
+            // 詰めろとして設定（相手番で詰みあり = 元の手番側が詰めろ）
             this.IsThreatening = true;
             this.ThreateningMateIn = info.MateIn.Value;
-            // 元の手番側に詰めろがかかっている（相手番で詰ませるので）
             this.ThreateningPlayer = this._currentPlayer;
+
+            // 本局面の分析結果が誤ってここに来た可能性も考慮して、MateIn も設定
+            // （タイミングの問題で本局面の詰み結果がここで処理される場合がある）
+            this.MateIn = info.MateIn.Value;
+            this.MatePlayer = this._currentPlayer;
         }
     }
 
@@ -372,8 +389,10 @@ public class ShogiEngineService : IAsyncDisposable
         }
 
         // 評価値を先手視点に変換
-        // USI標準では手番側目線で返すため、後手番なら符号反転
-        // ※YaneuraOuが先手目線固定で返す場合は変換不要
+        // エンジンは分析対象局面の手番側目線でスコアを返す
+        // - 先手番の局面を分析 → 先手目線のスコア → 変換不要
+        // - 後手番の局面を分析 → 後手目線のスコア → 符号反転で先手視点に変換
+        // ※プレイヤーが誰か（先手側/後手側）は関係なく、分析対象の局面の手番で決まる
         var normalizedScore = this._currentPlayer == Player.Gote ? -info.Score : info.Score;
 
         // デバッグ用：変換前後の値をログ出力
