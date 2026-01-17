@@ -338,6 +338,10 @@ public partial class Index : IAsyncDisposable
 
     private Task GoForwardAsync() => this.GameService.GoForwardAsync();
 
+    private Task GoToPreviousBranchAsync() => this.GameService.GoToPreviousBranchAsync();
+
+    private Task GoToNextBranchAsync() => this.GameService.GoToNextBranchAsync();
+
     private Task GoForwardBranchAsync(int branchIndex) => this.GameService.GoForwardBranchAsync(branchIndex);
 
     private Task GoToLatestAsync() => this.GameService.GoToLatestAsync();

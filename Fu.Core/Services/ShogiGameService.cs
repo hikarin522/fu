@@ -638,6 +638,55 @@ public class ShogiGameService
         await this.NotifyStateChangedAsync();
     }
 
+    /// <summary>前のブランチに移動（そのブランチの終端を表示）</summary>
+    public async Task GoToPreviousBranchAsync()
+    {
+        var allEndNodes = this.State.MoveTree.GetAllBranchEndNodes();
+        if (allEndNodes.Count <= 1) {
+            return;
+        }
+
+        var currentIndex = this.GetCurrentBranchIndex();
+        var newIndex = currentIndex > 0 ? currentIndex - 1 : allEndNodes.Count - 1;
+        await this.GoToBranchEndAsync(newIndex);
+    }
+
+    /// <summary>次のブランチに移動（そのブランチの終端を表示）</summary>
+    public async Task GoToNextBranchAsync()
+    {
+        var allEndNodes = this.State.MoveTree.GetAllBranchEndNodes();
+        if (allEndNodes.Count <= 1) {
+            return;
+        }
+
+        var currentIndex = this.GetCurrentBranchIndex();
+        var newIndex = (currentIndex + 1) % allEndNodes.Count;
+        await this.GoToBranchEndAsync(newIndex);
+    }
+
+    /// <summary>指定したブランチの終端に移動</summary>
+    private async Task GoToBranchEndAsync(int branchIndex)
+    {
+        var allEndNodes = this.State.MoveTree.GetAllBranchEndNodes();
+        if (branchIndex < 0 || branchIndex >= allEndNodes.Count) {
+            return;
+        }
+
+        var endNode = allEndNodes[branchIndex];
+        await this.GoToNodeAsync(endNode);
+    }
+
+    /// <summary>現在表示中のブランチインデックスを取得</summary>
+    public int GetCurrentBranchIndex()
+    {
+        // 閲覧位置またはMoveHistoryの最後を基準にする
+        this.SyncMoveTreeToViewingPosition();
+        return this.State.MoveTree.GetBranchIndexForNode(this.State.MoveTree.CurrentNode);
+    }
+
+    /// <summary>総ブランチ数を取得（終端ノードの数）</summary>
+    public int GetTotalBranchCount() => this.State.MoveTree.GetAllBranchEndNodes().Count;
+
     public (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) GetBoardAtMove(int moveIndex) =>
         ReconstructBoard(this.State.MoveHistory.Take(moveIndex));
 

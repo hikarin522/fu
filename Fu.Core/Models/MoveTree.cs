@@ -237,4 +237,57 @@ public sealed class MoveTree
 
         return moves.ToImmutable();
     }
+
+    /// <summary>全てのブランチ（各ラインの終端ノード）を取得</summary>
+    public ImmutableList<MoveNode> GetAllBranchEndNodes()
+    {
+        var endNodes = ImmutableList.CreateBuilder<MoveNode>();
+        CollectEndNodes(this._rootChildren, endNodes);
+        return endNodes.ToImmutable();
+    }
+
+    private static void CollectEndNodes(IReadOnlyList<MoveNode> nodes, ImmutableList<MoveNode>.Builder endNodes)
+    {
+        foreach (var node in nodes) {
+            if (node.Children.Count == 0) {
+                // 終端ノード
+                endNodes.Add(node);
+            } else {
+                // 子ノードを再帰的に探索
+                CollectEndNodes(node.Children, endNodes);
+            }
+        }
+    }
+
+    /// <summary>指定したノードがどのブランチインデックスに属するか取得</summary>
+    public int GetBranchIndexForNode(MoveNode? node)
+    {
+        if (node is null) {
+            return 0;
+        }
+
+        var allEndNodes = this.GetAllBranchEndNodes();
+        // ノードのパスを取得
+        var nodePath = node.GetPath();
+
+        for (var i = 0; i < allEndNodes.Count; i++) {
+            var endNode = allEndNodes[i];
+            var endPath = endNode.GetPath();
+
+            // 現在のノードがこのブランチのパス上にあるかチェック
+            if (nodePath.Count <= endPath.Count) {
+                var match = true;
+                for (var j = 0; j < nodePath.Count; j++) {
+                    if (!ReferenceEquals(nodePath[j], endPath[j])) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    return i;
+                }
+            }
+        }
+        return 0;
+    }
 }

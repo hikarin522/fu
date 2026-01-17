@@ -179,9 +179,13 @@
             }
         </div>
         <div class="history-navigation">
-            <button class="btn-nav" @onclick="GoBackAsync" disabled="@(GameService.State.DisplayMoveIndex == 0)">&lt;</button>
-            <span class="move-index">@GameService.State.DisplayMoveIndex / @GameService.State.MoveHistory.Count 分岐:@GameService.State.MoveTree.TotalBranchCount</span>
-            <button class="btn-nav" @onclick="GoForwardAsync" disabled="@(!GameService.State.IsReviewing)">&gt;</button>
+            @{
+                var totalBranches = GameService.GetTotalBranchCount();
+                var currentBranch = totalBranches > 1 ? GameService.GetCurrentBranchIndex() + 1 : 1;
+            }
+            <button class="btn-nav" @onclick="GoToPreviousBranchAsync" disabled="@(totalBranches <= 1)">&lt;</button>
+            <span class="move-index">分岐: @currentBranch / @totalBranches</span>
+            <button class="btn-nav" @onclick="GoToNextBranchAsync" disabled="@(totalBranches <= 1)">&gt;</button>
         </div>
         @if (GameService.State.IsReviewing)
         {
