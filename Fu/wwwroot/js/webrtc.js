@@ -30,15 +30,11 @@ window.WebRtc = {
         currentRoomId = generateRoomId();
         myPeerId = generatePeerId();
 
-        await joinTrysteroRoom(currentRoomId);
-
-        // ホスト自身を参加者として追加
-        participants.set(myPeerId, { nickname: myNickname, isHost: true });
-
         if (dotNetRef) {
             dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
-            dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', myPeerId, nickname, true);
         }
+
+        await joinTrysteroRoom(currentRoomId);
 
         console.log('Room created with ID:', currentRoomId);
         return currentRoomId;
