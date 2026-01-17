@@ -158,6 +158,11 @@ async function joinTrysteroRoom(roomId) {
             console.log('Mapped Trystero ID', tryseteroPeerId, 'to DotNet ID', dotNetId);
             if (dotNetRef) {
                 dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', dotNetId, info.nickname, info.isHost);
+
+                // 参加者が2人になったら接続完了（peerinfo受信後に通知）
+                if (participants.size >= 2) {
+                    dotNetRef.invokeMethodAsync('OnDataChannelOpen');
+                }
             }
         }
     });
@@ -186,10 +191,7 @@ async function joinTrysteroRoom(roomId) {
             isHost: isHost
         }));
 
-        // 接続状態を更新（自分を含めて2人になったら接続完了）
-        if (dotNetRef && participants.size === 1) {
-            dotNetRef.invokeMethodAsync('OnDataChannelOpen');
-        }
+        // 注: OnDataChannelOpenはpeerinfo受信後に呼ばれる（onPIハンドラ内）
     });
 
     // ピア退出ハンドラ
