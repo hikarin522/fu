@@ -57,9 +57,35 @@ public partial class Index : IAsyncDisposable
     private bool IsSpectator => !this.IsPlayer && this.GameService.State.Status == GameStatus.Playing;
     private bool IsGameEnded => this.GameService.State.Status.IsGameOver();
 
-    // 観戦者リスト（対局者以外の参加者）
-    private IEnumerable<Participant> Spectators => this.WebRtcService.Participants
-        .Where(p => p.PeerId != this.SentePeerId && p.PeerId != this.GotePeerId);
+    // 参加者一覧表示用
+    private string GetParticipantRole(string peerId) =>
+        peerId == this.SentePeerId ? "先手" : peerId == this.GotePeerId ? "後手" : "観戦";
+
+    private int GetParticipantSortOrder(string peerId) =>
+        peerId == this.SentePeerId ? 0 : peerId == this.GotePeerId ? 1 : 2;
+
+    private IEnumerable<(Participant Participant, string Role, bool IsConnected, bool IsMe)> GetAllParticipantsInfo()
+    {
+        var connectedPeerIds = this.WebRtcService.Participants.Select(p => p.PeerId).ToHashSet();
+        var myPeerId = this.WebRtcService.MyPeerId;
+
+        // 接続中の参加者（対局者優先でソート）
+        foreach (var p in this.WebRtcService.Participants.OrderBy(p => this.GetParticipantSortOrder(p.PeerId))) {
+            yield return (p, this.GetParticipantRole(p.PeerId), true, p.PeerId == myPeerId);
+        }
+
+        // 切断された対局者を表示（ゲーム中の場合のみ）
+        if (this.GameService.State.Status is not (GameStatus.Playing or GameStatus.Reviewing)) {
+            yield break;
+        }
+
+        if (this.SentePeerId is not null && !connectedPeerIds.Contains(this.SentePeerId)) {
+            yield return (new Participant(this.SentePeerId, this.SenteNickname, false), "先手", false, false);
+        }
+        if (this.GotePeerId is not null && !connectedPeerIds.Contains(this.GotePeerId)) {
+            yield return (new Participant(this.GotePeerId, this.GoteNickname, false), "後手", false, false);
+        }
+    }
 
     // 評価値表示（観戦者・対局終了後は常に全表示）
     private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded;

@@ -911,8 +911,8 @@ a, .btn-link {
     font-weight: bold;
 }
 
-/* 観戦者リスト */
-.spectator-list {
+/* 参加者一覧 */
+.participants-list {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -924,17 +924,52 @@ a, .btn-link {
     justify-content: center;
 }
 
-.spectator-list-label {
+.participants-label {
     color: #666;
     font-size: 0.9rem;
+    margin-right: 4px;
 }
 
-.spectator-name {
-    background: #e3f2fd;
-    color: #1565c0;
+.participant-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 4px 10px;
     border-radius: 12px;
     font-size: 0.85rem;
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.participant-item.disconnected {
+    background: #ffebee;
+    color: #c62828;
+    opacity: 0.7;
+}
+
+.participant-item.is-me {
+    border: 2px solid #1976d2;
+}
+
+.participant-name {
+    font-weight: 500;
+}
+
+.participant-role {
+    font-size: 0.75rem;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.1);
+}
+
+.participant-item.disconnected .participant-role {
+    background: rgba(0,0,0,0.08);
+}
+
+.participant-status {
+    font-size: 0.7rem;
+    color: #c62828;
+    font-weight: bold;
 }
 
 /* 評価値バー */

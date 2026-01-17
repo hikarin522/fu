@@ -155,16 +155,20 @@
                         </button>
                     </div>
                 }
-                @if (Spectators.Any())
-                {
-                    <div class="spectator-list">
-                        <span class="spectator-list-label">観戦者:</span>
-                        @foreach (var spectator in Spectators)
-                        {
-                            <span class="spectator-name">@spectator.Nickname</span>
-                        }
-                    </div>
-                }
+                <div class="participants-list">
+                    <span class="participants-label">参加者:</span>
+                    @foreach (var (participant, role, isConnected, isMe) in GetAllParticipantsInfo())
+                    {
+                        <span class="participant-item @(isConnected ? "connected" : "disconnected") @(isMe ? "is-me" : "")">
+                            <span class="participant-name">@participant.Nickname</span>
+                            <span class="participant-role">@role</span>
+                            @if (!isConnected)
+                            {
+                                <span class="participant-status">切断</span>
+                            }
+                        </span>
+                    }
+                </div>
                 @if (ShowEvaluation)
                 {
                     <EvaluationBar
