@@ -9,6 +9,7 @@ namespace Fu.Core.Services;
 public static class KifExporter
 {
     private static readonly string[] RowKanji = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
+    private static readonly string[] ColKanji = ["９", "８", "７", "６", "５", "４", "３", "２", "１"];
 
     public static string Export(ImmutableList<Move> moves, GameStatus status, string senteNickname = "", string goteNickname = "")
     {
@@ -30,7 +31,7 @@ public static class KifExporter
             var move = moves[i];
             var moveNumber = i + 1;
             var notation = FormatMove(move, lastTo);
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{moveNumber,-4} {notation}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{moveNumber,4} {notation}");
             lastTo = move.To;
         }
 
@@ -42,7 +43,7 @@ public static class KifExporter
         };
 
         if (!string.IsNullOrEmpty(resultText)) {
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{moves.Count,-4} {resultText}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{moves.Count,4} {resultText}");
         }
 
         return sb.ToString();
@@ -82,7 +83,7 @@ public static class KifExporter
 
     private static string FormatPosition(Position pos)
     {
-        var col = 9 - pos.Col;
+        var col = ColKanji[pos.Col];
         var row = RowKanji[pos.Row];
         return $"{col}{row}";
     }

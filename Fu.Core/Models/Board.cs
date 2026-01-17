@@ -48,8 +48,8 @@ public record Board
         builder[7 * Size + 0] = new(PieceType.Knight, Player.Gote);
         builder[0 * Size + 0] = new(PieceType.Lance, Player.Gote);
         builder[8 * Size + 0] = new(PieceType.Lance, Player.Gote);
-        builder[1 * Size + 1] = new(PieceType.Bishop, Player.Gote);
-        builder[7 * Size + 1] = new(PieceType.Rook, Player.Gote);
+        builder[7 * Size + 1] = new(PieceType.Bishop, Player.Gote);
+        builder[1 * Size + 1] = new(PieceType.Rook, Player.Gote);
         for (var col = 0; col < Size; col++) {
             builder[col * Size + 2] = new(PieceType.Pawn, Player.Gote);
         }
@@ -64,8 +64,8 @@ public record Board
         builder[7 * Size + 8] = new(PieceType.Knight, Player.Sente);
         builder[0 * Size + 8] = new(PieceType.Lance, Player.Sente);
         builder[8 * Size + 8] = new(PieceType.Lance, Player.Sente);
-        builder[7 * Size + 7] = new(PieceType.Bishop, Player.Sente);
-        builder[1 * Size + 7] = new(PieceType.Rook, Player.Sente);
+        builder[1 * Size + 7] = new(PieceType.Bishop, Player.Sente);
+        builder[7 * Size + 7] = new(PieceType.Rook, Player.Sente);
         for (var col = 0; col < Size; col++) {
             builder[col * Size + 6] = new(PieceType.Pawn, Player.Sente);
         }
