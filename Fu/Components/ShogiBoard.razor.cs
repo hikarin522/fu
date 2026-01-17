@@ -320,4 +320,52 @@ public partial class ShogiBoard
     {
         public bool IsDrop => this.DropPiece is not null;
     }
+
+    /// <summary>矢印描画用の計算結果</summary>
+    private readonly record struct ArrowGeometry(
+        double X1, double Y1,
+        double BaseX, double BaseY,
+        double TipX, double TipY,
+        double LeftX, double LeftY,
+        double RightX, double RightY,
+        int StrokeWidth);
+
+    /// <summary>矢印のジオメトリを計算</summary>
+    private static ArrowGeometry? CalculateArrowGeometry(double x1, double y1, double x2, double y2, int strokeWidth, bool shortenStart = false)
+    {
+        var dx = x2 - x1;
+        var dy = y2 - y1;
+        var length = Math.Sqrt(dx * dx + dy * dy);
+        if (length <= 0) {
+            return null;
+        }
+
+        var arrowHeadLength = strokeWidth * 2.5;
+        var arrowHeadWidth = strokeWidth * 1.5;
+        var unitX = dx / length;
+        var unitY = dy / length;
+        var perpX = -unitY;
+        var perpY = unitX;
+
+        // 始点を少し短くして駒と重ならないようにする（通常移動の場合）
+        var adjX1 = x1;
+        var adjY1 = y1;
+        if (shortenStart) {
+            var shortenRatio = 15 / length;
+            adjX1 = x1 + dx * shortenRatio;
+            adjY1 = y1 + dy * shortenRatio;
+        }
+
+        // 三角形の頂点はマス目の中心(x2, y2)、付け根は頂点から後ろ
+        var baseX = x2 - unitX * arrowHeadLength;
+        var baseY = y2 - unitY * arrowHeadLength;
+
+        // 鏃の左右の点
+        var leftX = baseX + perpX * arrowHeadWidth;
+        var leftY = baseY + perpY * arrowHeadWidth;
+        var rightX = baseX - perpX * arrowHeadWidth;
+        var rightY = baseY - perpY * arrowHeadWidth;
+
+        return new ArrowGeometry(adjX1, adjY1, baseX, baseY, x2, y2, leftX, leftY, rightX, rightY, strokeWidth);
+    }
 }

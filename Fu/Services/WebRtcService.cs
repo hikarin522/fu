@@ -39,7 +39,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public RoomId? RoomId { get; private set; }
     public IReadOnlyCollection<Participant> Participants => this._participants.Values;
 
-    public event Func<Move, Task>? OnMoveReceived;
+    public event Func<Move, TimeSpan, Task>? OnMoveReceived;
     public event Func<ConnectionState, Task>? OnStateChanged;
     public event Func<Task>? OnGameStart;
     public event Func<Task>? OnDataChannelReady;
@@ -81,8 +81,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         this.MyPeerId = await jsRuntime.InvokeAsync<string>("WebRtc.getMyPeerId");
     }
 
-    public Task SendMoveAsync(Move move) =>
-        this.SendMessageAsync(new MoveMessage(move.ToDto()));
+    public Task SendMoveAsync(Move move, TimeSpan elapsedTime) =>
+        this.SendMessageAsync(new MoveMessage(move.ToDto(), (int)elapsedTime.TotalSeconds));
 
     public Task SendGameStartAsync(string sentePeerId, string gotePeerId, EvaluationDisplayOptions? evaluationOptions = null) =>
         this.SendMessageAsync(new GameStartWithPlayersMessage(sentePeerId, gotePeerId, evaluationOptions));
@@ -245,7 +245,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     {
         var msg = JsonSerializer.Deserialize<MoveMessage>(message, JsonConfig.Options);
         if (msg is not null && OnMoveReceived is { } handler) {
-            await handler(Move.FromDto(msg.Move));
+            var elapsedTime = TimeSpan.FromSeconds(msg.ElapsedSeconds);
+            await handler(Move.FromDto(msg.Move), elapsedTime);
         }
     }
 

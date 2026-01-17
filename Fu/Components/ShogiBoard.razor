@@ -56,34 +56,16 @@
                     var x2 = arrow.ToCol * 50 + 25;
                     var y2 = boardCellsTop + arrow.ToRow * 50 + 25;
 
-                    var dx = x2 - x1;
-                    var dy = y2 - y1;
-                    var length = Math.Sqrt(dx * dx + dy * dy);
-                    if (length > 0)
+                    var geometry = CalculateArrowGeometry(x1, y1, x2, y2, arrow.StrokeWidth, shortenStart: false);
+                    if (geometry is { } g)
                     {
-                        var arrowHeadLength = arrow.StrokeWidth * 2.5;
-                        var arrowHeadWidth = arrow.StrokeWidth * 1.5;
-                        var unitX = dx / length;
-                        var unitY = dy / length;
-                        var perpX = -unitY;
-                        var perpY = unitX;
-
-                        @* 三角形の頂点はマス目の中心(x2, y2)、付け根は頂点から後ろ *@
-                        var baseX = x2 - unitX * arrowHeadLength;
-                        var baseY = y2 - unitY * arrowHeadLength;
-
-                        var leftX = baseX + perpX * arrowHeadWidth;
-                        var leftY = baseY + perpY * arrowHeadWidth;
-                        var rightX = baseX - perpX * arrowHeadWidth;
-                        var rightY = baseY - perpY * arrowHeadWidth;
-
-                        <line x1="@x1.ToString("F1")" y1="@y1.ToString("F1")"
-                              x2="@baseX.ToString("F1")" y2="@baseY.ToString("F1")"
-                              stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
+                        <line x1="@g.X1.ToString("F1")" y1="@g.Y1.ToString("F1")"
+                              x2="@g.BaseX.ToString("F1")" y2="@g.BaseY.ToString("F1")"
+                              stroke="#2266cc" stroke-width="@g.StrokeWidth"
                               stroke-linecap="round"
                               opacity="0.7" />
 
-                        <path d="M @x2.ToString("F1") @y2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
+                        <path d="M @g.TipX.ToString("F1") @g.TipY.ToString("F1") L @g.LeftX.ToString("F1") @g.LeftY.ToString("F1") L @g.RightX.ToString("F1") @g.RightY.ToString("F1") Z"
                               fill="#2266cc"
                               opacity="0.7" />
                     }
@@ -161,54 +143,24 @@
                     <svg class="candidate-arrows-overlay" viewBox="0 0 450 450" preserveAspectRatio="none">
                         @foreach (var arrow in arrows)
                         {
-                            @* 移動先の座標 *@
+                            var x1 = arrow.FromCol * 50 + 25;
+                            var y1 = arrow.FromRow * 50 + 25;
                             var x2 = arrow.ToCol * 50 + 25;
                             var y2 = arrow.ToRow * 50 + 25;
 
-                            @* 通常の移動は矢印で表示 *@
-                            var x1 = arrow.FromCol * 50 + 25;
-                            var y1 = arrow.FromRow * 50 + 25;
+                            var geometry = CalculateArrowGeometry(x1, y1, x2, y2, arrow.StrokeWidth, shortenStart: true);
+                            if (geometry is { } g)
+                            {
+                                <line x1="@g.X1.ToString("F1")" y1="@g.Y1.ToString("F1")"
+                                      x2="@g.BaseX.ToString("F1")" y2="@g.BaseY.ToString("F1")"
+                                      stroke="#2266cc" stroke-width="@g.StrokeWidth"
+                                      stroke-linecap="round"
+                                      opacity="0.7" />
 
-                                var dx = x2 - x1;
-                                var dy = y2 - y1;
-                                var length = Math.Sqrt(dx * dx + dy * dy);
-                                if (length > 0)
-                                {
-                                    @* 矢印の鏃を計算 *@
-                                    var arrowHeadLength = arrow.StrokeWidth * 2.5;
-                                    var arrowHeadWidth = arrow.StrokeWidth * 1.5;
-                                    var unitX = dx / length;
-                                    var unitY = dy / length;
-                                    var perpX = -unitY;
-                                    var perpY = unitX;
-
-                                    @* 始点を少し短くして駒と重ならないようにする *@
-                                    var shortenRatio = 15 / length;
-                                    var adjX1 = x1 + dx * shortenRatio;
-                                    var adjY1 = y1 + dy * shortenRatio;
-
-                                    @* 三角形の頂点はマス目の中心(x2, y2)、付け根は頂点から後ろ *@
-                                    var baseX = x2 - unitX * arrowHeadLength;
-                                    var baseY = y2 - unitY * arrowHeadLength;
-
-                                    @* 鏃の左右の点 *@
-                                    var leftX = baseX + perpX * arrowHeadWidth;
-                                    var leftY = baseY + perpY * arrowHeadWidth;
-                                    var rightX = baseX - perpX * arrowHeadWidth;
-                                    var rightY = baseY - perpY * arrowHeadWidth;
-
-                                    @* 矢印の本体（線） *@
-                                    <line x1="@adjX1.ToString("F1")" y1="@adjY1.ToString("F1")"
-                                          x2="@baseX.ToString("F1")" y2="@baseY.ToString("F1")"
-                                          stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
-                                          stroke-linecap="round"
-                                          opacity="0.7" />
-
-                                    @* 矢印の鏃（頂点がマス目の中心） *@
-                                    <path d="M @x2.ToString("F1") @y2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
-                                          fill="#2266cc"
-                                          opacity="0.7" />
-                                }
+                                <path d="M @g.TipX.ToString("F1") @g.TipY.ToString("F1") L @g.LeftX.ToString("F1") @g.LeftY.ToString("F1") L @g.RightX.ToString("F1") @g.RightY.ToString("F1") Z"
+                                      fill="#2266cc"
+                                      opacity="0.7" />
+                            }
                         }
                     </svg>
                 }

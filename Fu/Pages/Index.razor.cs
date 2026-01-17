@@ -81,6 +81,10 @@ public partial class Index : IAsyncDisposable
     // 通知音設定
     private bool SoundEnabled { get; set; } = true;
 
+    // タイマー更新用
+    private Timer? _uiTimer;
+    private TimeSpan _currentTurnElapsed;
+
     protected override async Task OnInitializedAsync()
     {
         try {
@@ -113,9 +117,21 @@ public partial class Index : IAsyncDisposable
 
             // エンジン初期化（バックグラウンドで実行）
             _ = this.InitializeEngineAsync();
+
+            // UIタイマー開始（1秒ごとに更新）
+            this._uiTimer = new Timer(this.OnTimerTick, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
         }
         catch (Exception ex) {
             this.InitError = ex.Message;
+        }
+    }
+
+    private void OnTimerTick(object? state)
+    {
+        // 対局中のみ更新
+        if (this.GameService.State.Status == GameStatus.Playing && !this.GameService.State.IsReviewing) {
+            this._currentTurnElapsed = this.GameService.GetCurrentTurnElapsed();
+            _ = this.InvokeAsync(this.StateHasChanged);
         }
     }
 
@@ -142,13 +158,15 @@ public partial class Index : IAsyncDisposable
 
     private async Task OnMoveMade(Move move)
     {
-        await this.WebRtcService.SendMoveAsync(move);
+        // 自分の消費時間を取得して送信
+        var elapsedTime = this.GameService.LastMoveElapsedTime;
+        await this.WebRtcService.SendMoveAsync(move, elapsedTime);
         this.StateHasChanged();
     }
 
-    private async Task OnRemoteMoveReceivedAsync(Move move)
+    private async Task OnRemoteMoveReceivedAsync(Move move, TimeSpan elapsedTime)
     {
-        await this.GameService.ApplyRemoteMoveAsync(move);
+        await this.GameService.ApplyRemoteMoveAsync(move, elapsedTime);
 
         // 自分の手番になったら通知音を鳴らす
         if (this.IsPlayer && this.GameService.State.IsMyTurn) {
@@ -506,6 +524,23 @@ public partial class Index : IAsyncDisposable
         }
     }
 
+    /// <summary>プレイヤーの累計時間を取得（現在の手番の経過時間を含む）</summary>
+    private TimeSpan GetPlayerTime(Player player)
+    {
+        var totalTime = player == Player.Sente
+            ? this.GameService.State.SenteTotalTime
+            : this.GameService.State.GoteTotalTime;
+
+        // 対局中で、このプレイヤーが現在の手番なら経過時間を加算
+        if (this.GameService.State.Status == GameStatus.Playing &&
+            !this.GameService.State.IsReviewing &&
+            this.GameService.State.CurrentPlayer == player) {
+            totalTime += this._currentTurnElapsed;
+        }
+
+        return totalTime;
+    }
+
     private static string FormatTime(TimeSpan time)
     {
         if (time.TotalHours >= 1) {
@@ -516,6 +551,11 @@ public partial class Index : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // UIタイマーを破棄
+        if (this._uiTimer is not null) {
+            await this._uiTimer.DisposeAsync();
+        }
+
         this.WebRtcService.OnMoveReceived -= this.OnRemoteMoveReceivedAsync;
         this.WebRtcService.OnGameStart -= this.OnRemoteGameStartAsync;
         this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReadyAsync;

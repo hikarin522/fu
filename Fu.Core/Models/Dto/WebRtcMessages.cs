@@ -8,7 +8,9 @@ public abstract record WebRtcMessage(string Type);
 /// <summary>
 /// 指し手送信メッセージ
 /// </summary>
-public sealed record MoveMessage(MoveDto Move) : WebRtcMessage("move");
+/// <param name="Move">指し手</param>
+/// <param name="ElapsedSeconds">消費時間（秒）</param>
+public sealed record MoveMessage(MoveDto Move, int ElapsedSeconds = 0) : WebRtcMessage("move");
 
 /// <summary>
 /// ゲーム開始メッセージ

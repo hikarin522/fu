@@ -117,7 +117,7 @@
                         (@(IsFlipped ? "先手" : "後手"))
                     </span>
                     <span class="player-time">
-                        @FormatTime(IsFlipped ? GameService.State.SenteTotalTime : GameService.State.GoteTotalTime)
+                        @FormatTime(GetPlayerTime(IsFlipped ? Player.Sente : Player.Gote))
                     </span>
                 </div>
 
@@ -139,7 +139,7 @@
                         }
                     </span>
                     <span class="player-time">
-                        @FormatTime(IsFlipped ? GameService.State.GoteTotalTime : GameService.State.SenteTotalTime)
+                        @FormatTime(GetPlayerTime(IsFlipped ? Player.Gote : Player.Sente))
                     </span>
                 </div>
 
@@ -211,27 +211,25 @@
             <span class="move-index">分岐: @currentBranch / @totalBranches</span>
             <button class="btn-nav" @onclick="GoToNextBranchAsync" disabled="@(totalBranches <= 1)">&gt;</button>
         </div>
-        @if (GameService.State.IsReviewing)
+        @* 検討ボタン群 *@
+        @{
+            var isReviewing = GameService.State.IsReviewing;
+            var isGameOver = GameService.State.Status.IsGameOver();
+            var isReviewMode = GameService.State.Status == GameStatus.Reviewing;
+            var canResumeFromBranch = GameService.State.Status == GameStatus.Playing && !GameService.State.IsAtActiveBranchLatest;
+        }
+        @if (isReviewing || isReviewMode)
         {
             <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
-            @if (GameService.State.Status == GameStatus.Playing && !GameService.State.IsAtActiveBranchLatest)
-            {
-                <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
-            }
-            @if (GameService.State.Status.IsGameOver())
-            {
-                <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
-                <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>
-            }
         }
-        @if (GameService.State.Status.IsGameOver() && !GameService.State.IsReviewing)
+        @if (isReviewing && canResumeFromBranch)
+        {
+            <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
+        }
+        @if (isGameOver)
         {
             <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
             <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>
-        }
-        @if (GameService.State.Status == GameStatus.Reviewing && GameService.State.IsReviewing)
-        {
-            <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
         }
         <MoveTreeView
             MoveTree="GameService.State.MoveTree"

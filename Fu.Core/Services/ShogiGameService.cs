@@ -16,6 +16,9 @@ public class ShogiGameService
 
     public GameState State { get; private set; } = GameState.Initial;
 
+    /// <summary>最後に記録された手の消費時間（送信用）</summary>
+    public TimeSpan LastMoveElapsedTime { get; private set; }
+
     public event Func<ValueTask>? OnStateChangedAsync;
     public event Func<ImmutableList<Move>, ValueTask>? OnBranchResumedAsync;
     public event Func<ImmutableList<Move>, ValueTask>? OnReviewStartedAsync;
@@ -53,14 +56,32 @@ public class ShogiGameService
         this._turnStopwatch.Restart();
     }
 
-    /// <summary>手番タイマーを停止して経過時間を取得</summary>
+    /// <summary>手番タイマーを停止して経過時間を取得（秒未満切り捨て）</summary>
     private TimeSpan StopTurnTimer()
     {
+        // リモートからの時間が指定されている場合はそれを使用
+        if (this._pendingRemoteElapsedTime is { } remoteTime) {
+            this._turnStopwatch.Restart();
+            this.LastMoveElapsedTime = remoteTime;
+            return remoteTime;
+        }
+
         this._turnStopwatch.Stop();
-        var elapsed = this._turnStopwatch.Elapsed;
+        var elapsed = TruncateToSeconds(this._turnStopwatch.Elapsed);
         this._turnStopwatch.Restart();
+        this.LastMoveElapsedTime = elapsed;
         return elapsed;
     }
+
+    private TimeSpan? _pendingRemoteElapsedTime;
+
+    /// <summary>現在の手番の経過時間を取得（秒未満切り捨て、リアルタイム表示用）</summary>
+    public TimeSpan GetCurrentTurnElapsed() =>
+        this._turnStopwatch.IsRunning ? TruncateToSeconds(this._turnStopwatch.Elapsed) : TimeSpan.Zero;
+
+    /// <summary>TimeSpanを秒単位に切り捨て</summary>
+    private static TimeSpan TruncateToSeconds(TimeSpan time) =>
+        TimeSpan.FromSeconds(Math.Floor(time.TotalSeconds));
 
     public async Task SetLocalPlayerAsync(Player player)
     {
@@ -309,8 +330,25 @@ public class ShogiGameService
         return true;
     }
 
-    public Task ApplyRemoteMoveAsync(Move move) =>
-        this.TryMakeMoveAsync(move.WithPlayer(this.State.CurrentPlayer));
+    /// <summary>リモートから受信した手を適用（消費時間も適用）</summary>
+    public Task ApplyRemoteMoveAsync(Move move, TimeSpan elapsedTime) =>
+        this.TryMakeMoveWithTimeAsync(move.WithPlayer(this.State.CurrentPlayer), elapsedTime);
+
+    /// <summary>指定した消費時間で手を適用（リモート受信用）</summary>
+    private async Task<bool> TryMakeMoveWithTimeAsync(Move move, TimeSpan elapsedTime)
+    {
+        // 自分のタイマーを停止（リモートの手なので自分の時間は関係ない）
+        this._turnStopwatch.Stop();
+
+        // 消費時間を一時的に設定してから通常の処理を実行
+        this._pendingRemoteElapsedTime = elapsedTime;
+        try {
+            return await this.TryMakeMoveAsync(move);
+        }
+        finally {
+            this._pendingRemoteElapsedTime = null;
+        }
+    }
 
     /// <summary>リモートからの分岐再開を適用</summary>
     public async Task ApplyBranchResumeAsync(IReadOnlyList<Move> moveHistory)
