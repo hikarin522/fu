@@ -24,6 +24,17 @@
         <a href="" class="reload">リロード</a>
         <a class="dismiss">✕</a>
     </div>
+    <!-- GitHub Pages SPA redirect handler -->
+    <script type="text/javascript">
+        (function(l) {
+            if (l.search[1] === '/') {
+                var decoded = l.search.slice(1).split('&').map(function(s) {
+                    return s.replace(/~and~/g, '&')
+                }).join('?');
+                window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
+            }
+        }(window.location))
+    </script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="js/webrtc.js"></script>
     <script>
