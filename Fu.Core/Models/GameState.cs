@@ -106,6 +106,9 @@ public record GameState(
     public bool IsReviewing => this.IsViewingDifferentBranch ||
                                (this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count);
 
+    /// <summary>現在のブランチの最新局面を見ているかどうか</summary>
+    public bool IsAtBranchLatest => !this.ViewingMoveIndex.HasValue || this.ViewingMoveIndex.Value >= this.MoveHistory.Count;
+
     /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
     public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.MoveHistory.Count;
 

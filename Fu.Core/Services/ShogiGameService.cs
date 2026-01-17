@@ -589,10 +589,11 @@ public class ShogiGameService
     public async Task GoToLatestAsync()
     {
         if (this.State.IsReviewing) {
-            // 現在表示中のMoveHistory（別のブランチの場合はそのブランチ）の最新に移動
+            // 現在のブランチ（MoveHistory）の最新局面に移動
+            // IsViewingDifferentBranchもリセットして、現在の対局のブランチに戻る
             this.State = this.State with {
-                ViewingMoveIndex = null
-                // IsViewingDifferentBranchは維持（別のブランチを見ている場合はそのまま）
+                ViewingMoveIndex = null,
+                IsViewingDifferentBranch = false
             };
             await this.NotifyStateChangedAsync();
         }
