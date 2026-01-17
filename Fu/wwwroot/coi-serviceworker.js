@@ -1,6 +1,6 @@
 /*! coi-serviceworker v0.1.7 - Guido Zuidhof and contributors, licensed under MIT */
 /*! Modified to fix null body status response issue */
-/*! v2: Added no-cache headers for _framework files */
+/*! v3: Bypass HTTP cache for _framework files */
 let coepCredentialless = false;
 if (typeof window === 'undefined') {
     self.addEventListener("install", () => self.skipWaiting());
@@ -29,11 +29,20 @@ if (typeof window === 'undefined') {
             return;
         }
 
-        const request = (coepCredentialless && r.mode === "no-cors")
-            ? new Request(r, {
-                credentials: "omit",
-            })
-            : r;
+        const url = new URL(r.url);
+        const isFrameworkFile = url.pathname.includes('/_framework/');
+
+        // Create request with appropriate options
+        let request;
+        if (isFrameworkFile) {
+            // Bypass HTTP cache for _framework files to avoid stale WASM issues
+            request = new Request(r, { cache: 'no-store' });
+        } else if (coepCredentialless && r.mode === "no-cors") {
+            request = new Request(r, { credentials: "omit" });
+        } else {
+            request = r;
+        }
+
         event.respondWith(
             fetch(request)
                 .then((response) => {
@@ -55,8 +64,7 @@ if (typeof window === 'undefined') {
                     const nullBodyStatus = [101, 204, 205, 304];
 
                     // Prevent caching of _framework files to avoid WASM 404 errors after updates
-                    const url = new URL(request.url);
-                    if (url.pathname.includes('/_framework/') || url.pathname.includes('/blazor.boot.json')) {
+                    if (isFrameworkFile) {
                         newHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
                     }
 

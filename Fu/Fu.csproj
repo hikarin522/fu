@@ -3,8 +3,6 @@
   <PropertyGroup>
     <!-- Disable fingerprinting to work with static hosting (GitHub Pages) -->
     <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
-    <!-- Disable content hash in file names for better cache control -->
-    <WasmFingerprintAssets>false</WasmFingerprintAssets>
   </PropertyGroup>
 
   <ItemGroup>
