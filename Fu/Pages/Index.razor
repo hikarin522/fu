@@ -168,6 +168,8 @@
         }
     </main>
 
+    @if (WebRtcService.IsConnected && !ShowNewGameDialog)
+    {
     <div class="move-history">
         <div class="move-history-header">
             <h4>棋譜</h4>
@@ -196,4 +198,5 @@
             }
         </div>
     </div>
+    }
 </div>

@@ -89,7 +89,7 @@
         </div>
     }
 
-    @if (ConnectionState == Services.ConnectionState.Connected || WebRtcService.Participants.Count > 0)
+    @if ((ConnectionState == Services.ConnectionState.Connected || WebRtcService.Participants.Count > 0) && !(ConnectionState == Services.ConnectionState.Connecting && WebRtcService.IsHost))
     {
         <div class="room-info">
             @if (!string.IsNullOrEmpty(RoomUrl))
