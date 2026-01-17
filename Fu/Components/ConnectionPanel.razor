@@ -89,18 +89,9 @@
         </div>
     }
 
-    @if ((ConnectionState == Services.ConnectionState.Connected || WebRtcService.Participants.Count > 0) && !(ConnectionState == Services.ConnectionState.Connecting && WebRtcService.IsHost))
+    @if (ConnectionState == Services.ConnectionState.Connected)
     {
         <div class="room-info">
-            @if (!string.IsNullOrEmpty(RoomUrl))
-            {
-                <div class="room-url-section compact">
-                    <label>招待URL：</label>
-                    <input type="text" readonly value="@RoomUrl" class="room-url-input small" />
-                    <button class="btn small" @onclick="() => CopyToClipboard(RoomUrl)">コピー</button>
-                </div>
-            }
-
             <div class="participants-section">
                 <h4>参加者 (@WebRtcService.Participants.Count)</h4>
                 <ul class="participants-list">
