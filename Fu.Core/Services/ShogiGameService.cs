@@ -203,9 +203,11 @@ public class ShogiGameService
     {
         var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
 
+        // MoveHistoryの手順に沿ってMoveTreeを辿る（分岐を正しく追跡）
         this.State.MoveTree.GoToStart();
         for (var i = 0; i < viewingIndex; i++) {
-            this.State.MoveTree.GoForward();
+            // AddMoveは既存の同じ手があればそれを返すので、正しいパスを辿れる
+            this.State.MoveTree.AddMove(this.State.MoveHistory[i]);
         }
 
         var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
