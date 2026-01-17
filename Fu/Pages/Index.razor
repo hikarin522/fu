@@ -187,7 +187,10 @@
                     {
                         <button class="btn danger" @onclick="ResignAsync">投了</button>
                     }
-                    <button class="btn" @onclick="OpenNewGameDialog">新規対局</button>
+                    @if (GameService.State.Status != GameStatus.Playing)
+                    {
+                        <button class="btn" @onclick="OpenNewGameDialog">新規対局</button>
+                    }
                     <button class="btn-small btn-sound" @onclick="ToggleSoundAsync" title="@(SoundEnabled ? "通知音OFF" : "通知音ON")">
                         @(SoundEnabled ? "🔔" : "🔕")
                     </button>

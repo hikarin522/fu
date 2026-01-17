@@ -1032,8 +1032,7 @@ public class ShogiGameService
     /// <summary>現在表示中のブランチインデックスを取得</summary>
     public int GetCurrentBranchIndex()
     {
-        // 閲覧位置またはMoveHistoryの最後を基準にする
-        this.SyncMoveTreeToViewingPosition();
+        // 現在表示中のノードを基準にする（MoveTree.CurrentNodeは閲覧中のブランチに合わせて更新されている）
         return this.State.MoveTree.GetBranchIndexForNode(this.State.MoveTree.CurrentNode);
     }
 

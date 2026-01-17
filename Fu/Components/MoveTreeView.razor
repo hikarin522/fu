@@ -87,12 +87,13 @@
         mainBranch.Nodes.Add(new(null, 0));
 
         var rowIndex = 1;
-        CollectBranchNodes(MoveTree!.RootChildren, mainBranch, branches, ref rowIndex, 1);
+        // 開始局面（row=0）から分岐する
+        CollectBranchNodes(MoveTree!.RootChildren, mainBranch, branches, ref rowIndex, 1, 0);
 
         return branches;
     }
 
-    private void CollectBranchNodes(IReadOnlyList<MoveNode> nodes, Branch currentBranch, List<Branch> allBranches, ref int rowIndex, int nextColumn)
+    private void CollectBranchNodes(IReadOnlyList<MoveNode> nodes, Branch currentBranch, List<Branch> allBranches, ref int rowIndex, int nextColumn, int parentRow)
     {
         for (var i = 0; i < nodes.Count; i++)
         {
@@ -100,18 +101,21 @@
 
             if (i == 0)
             {
-                currentBranch.Nodes.Add(new(node, rowIndex++));
-                CollectBranchNodes(node.Children, currentBranch, allBranches, ref rowIndex, nextColumn);
+                var currentRow = rowIndex++;
+                currentBranch.Nodes.Add(new(node, currentRow));
+                // 子ノードの親行は現在のノードの行
+                CollectBranchNodes(node.Children, currentBranch, allBranches, ref rowIndex, nextColumn, currentRow);
             }
             else
             {
-                var parentRow = currentBranch.Nodes[^1].Row;
+                // 分岐点は親ノードの行（この nodes を持っているノードの行）
                 var color = BranchColors[allBranches.Count % BranchColors.Length];
                 var newBranch = new Branch(nextColumn, currentBranch, parentRow, color);
                 allBranches.Add(newBranch);
 
-                newBranch.Nodes.Add(new(node, rowIndex++));
-                CollectBranchNodes(node.Children, newBranch, allBranches, ref rowIndex, nextColumn + 1);
+                var currentRow = rowIndex++;
+                newBranch.Nodes.Add(new(node, currentRow));
+                CollectBranchNodes(node.Children, newBranch, allBranches, ref rowIndex, nextColumn + 1, currentRow);
             }
         }
     }

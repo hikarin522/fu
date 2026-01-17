@@ -202,6 +202,13 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     }
 
     [JSInvokable]
+    public Task OnHostStatusChanged(bool newIsHost)
+    {
+        this.IsHost = newIsHost;
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
     public async Task OnMessageReceived(string message)
     {
         try {

@@ -162,17 +162,52 @@ async function joinTrysteroRoom(roomId) {
         // 相手が送ってきた自己申告のIDを使用する
         const dotNetId = info.id;
 
-        if (!trysteroToDotNetId.has(tryseteroPeerId)) {
+        const isKnownPeer = trysteroToDotNetId.has(tryseteroPeerId);
+
+        if (!isKnownPeer) {
+            // 新規参加者の場合
+            // 既にホストがいる場合、新規参加者のisHostはfalseに上書き
+            // （元ホストが再接続してきた場合の対策）
+            let effectiveIsHost = info.isHost;
+            if (effectiveIsHost) {
+                const existingHost = [...participants.values()].find(p => p.isHost);
+                if (existingHost) {
+                    console.log('Host already exists, ignoring isHost claim from new peer', dotNetId);
+                    effectiveIsHost = false;
+                }
+            }
+
             trysteroToDotNetId.set(tryseteroPeerId, dotNetId);
-            participants.set(dotNetId, { nickname: info.nickname, isHost: info.isHost });
+            participants.set(dotNetId, { nickname: info.nickname, isHost: effectiveIsHost });
             console.log('Mapped Trystero ID', tryseteroPeerId, 'to DotNet ID', dotNetId);
             if (dotNetRef) {
-                dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', dotNetId, info.nickname, info.isHost);
+                dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', dotNetId, info.nickname, effectiveIsHost);
 
                 // 参加者が2人になったら接続完了（peerinfo受信後に通知）
                 if (participants.size >= 2) {
                     dotNetRef.invokeMethodAsync('OnDataChannelOpen');
                 }
+            }
+        } else {
+            // 既知のピアからの更新（ホスト変更通知など）
+            const existing = participants.get(dotNetId);
+            if (existing && info.isHost && !existing.isHost) {
+                // 相手が新しくホストになった通知
+                // 自分がホストだった場合は自分のホスト状態を解除
+                if (isHost) {
+                    isHost = false;
+                    const myInfo = participants.get(myPeerId);
+                    if (myInfo) {
+                        myInfo.isHost = false;
+                    }
+                    console.log('Received host takeover notification, relinquishing host status');
+                    // C#側にもホスト状態解除を通知
+                    if (dotNetRef) {
+                        dotNetRef.invokeMethodAsync('OnHostStatusChanged', false);
+                    }
+                }
+                existing.isHost = true;
+                console.log('Updated host status for', dotNetId, 'to true (host takeover)');
             }
         }
     });
@@ -220,16 +255,31 @@ async function joinTrysteroRoom(roomId) {
             if (dotNetRef) {
                 dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
 
-                // ホストが退出した場合、自分がホストを引き継ぐ
+                // ホストが退出した場合、決定論的に新ホストを選出
+                // （PeerIDの辞書順で最小のピアがホストになる）
                 if (wasHost && !isHost) {
-                    isHost = true;
-                    // 自分の参加者情報を更新
-                    const myInfo = participants.get(myPeerId);
-                    if (myInfo) {
-                        myInfo.isHost = true;
+                    const remainingPeerIds = [...participants.keys()].sort();
+                    const shouldBecomeHost = remainingPeerIds.length > 0 && remainingPeerIds[0] === myPeerId;
+
+                    if (shouldBecomeHost) {
+                        isHost = true;
+                        // 自分の参加者情報を更新
+                        const myInfo = participants.get(myPeerId);
+                        if (myInfo) {
+                            myInfo.isHost = true;
+                        }
+                        console.log('Host left, becoming new host (elected):', myPeerId);
+                        dotNetRef.invokeMethodAsync('OnBecameHostCallback');
+
+                        // 他のピアに新ホスト情報を通知
+                        sendPeerInfo(JSON.stringify({
+                            id: myPeerId,
+                            nickname: myNickname,
+                            isHost: true
+                        }));
+                    } else {
+                        console.log('Host left, waiting for new host election. My ID:', myPeerId, 'Candidates:', remainingPeerIds);
                     }
-                    console.log('Host left, becoming new host:', myPeerId);
-                    dotNetRef.invokeMethodAsync('OnBecameHostCallback');
                 }
                 // 注: ルームは維持し続ける（相手が再接続してくる可能性があるため）
                 // OnDataChannelCloseは呼ばない
