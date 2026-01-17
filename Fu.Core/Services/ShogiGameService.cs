@@ -558,6 +558,14 @@ public class ShogiGameService
         }
     }
 
+    public async Task ResumeFromBranchAsync()
+    {
+        if (this.State.IsReviewing && this.State.Status == GameStatus.Playing) {
+            await this.BranchFromCurrentPositionAsync();
+            await this.NotifyStateChangedAsync();
+        }
+    }
+
     public async Task SetViewingMoveIndexAsync(int moveIndex)
     {
         var newIndex = moveIndex >= this.State.MoveHistory.Count ? null : (int?)moveIndex;

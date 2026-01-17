@@ -332,6 +332,8 @@ public partial class Index : IAsyncDisposable
 
     private Task GoToMoveAsync(int moveIndex) => this.GameService.SetViewingMoveIndexAsync(moveIndex);
 
+    private Task ResumeFromBranchAsync() => this.GameService.ResumeFromBranchAsync();
+
     /// <summary>Cross-Origin Isolationが無効な場合、Service Workerを有効にするためにリロードする</summary>
     private async Task CheckAndReloadForCrossOriginIsolationAsync()
     {

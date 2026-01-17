@@ -186,7 +186,7 @@
         @if (GameService.State.IsReviewing)
         {
             <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
-            <div class="branch-indicator">分岐から再開可能</div>
+            <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
         }
         <div class="history-list">
             @for (int i = 0; i < GameService.State.MoveHistory.Count; i++)
