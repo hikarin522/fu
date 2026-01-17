@@ -208,15 +208,17 @@ public class ShogiGameService
         var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
 
         // MoveHistoryの手順に沿ってMoveTreeを辿る（分岐を正しく追跡）
+        // 別ブランチを見ている場合はそのブランチの棋譜を使う
+        var displayHistory = this.State.DisplayBranchHistory;
         this.State.MoveTree.GoToStart();
         for (var i = 0; i < viewingIndex; i++) {
             // AddMoveは既存の同じ手があればそれを返すので、正しいパスを辿れる
-            this.State.MoveTree.AddMove(this.State.MoveHistory[i]);
+            this.State.MoveTree.AddMove(displayHistory[i]);
         }
 
         var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
 
-        var newHistory = this.State.MoveHistory.Take(viewingIndex).ToImmutableList();
+        var newHistory = displayHistory.Take(viewingIndex).ToImmutableList();
 
         this.State = this.State with {
             Board = board,
@@ -225,7 +227,7 @@ public class ShogiGameService
             CurrentPlayer = currentPlayer,
             MoveHistory = newHistory,
             ViewingMoveIndex = null,
-            IsViewingDifferentBranch = false
+            ViewingBranchHistory = null
         };
 
         // 分岐再開を通知（相手側に同期するため）
@@ -294,7 +296,7 @@ public class ShogiGameService
             [.. moveHistory],
             localPlayer,
             null,
-            false
+            null
         ) { MoveTree = moveTree };
 
         await this.NotifyStateChangedAsync();
@@ -589,13 +591,32 @@ public class ShogiGameService
     public async Task GoToLatestAsync()
     {
         if (this.State.IsReviewing) {
-            // 現在のブランチ（MoveHistory）の最新局面に移動
-            // IsViewingDifferentBranchもリセットして、現在の対局のブランチに戻る
+            // 対局中のブランチ（MoveHistory）の最新局面に移動
+            // MoveTreeの現在位置も対局中のブランチの最後に戻す
+            this.GoToMoveHistoryEnd();
+
             this.State = this.State with {
                 ViewingMoveIndex = null,
-                IsViewingDifferentBranch = false
+                ViewingBranchHistory = null
             };
             await this.NotifyStateChangedAsync();
+        }
+    }
+
+    /// <summary>MoveTreeの現在位置をMoveHistoryの最後に移動</summary>
+    private void GoToMoveHistoryEnd()
+    {
+        var moveTree = this.State.MoveTree;
+        moveTree.GoToStart();
+        foreach (var move in this.State.MoveHistory) {
+            // MoveTree上で対応するノードを探して進む
+            var nextMoves = moveTree.NextMoves;
+            var matchingNode = nextMoves.FirstOrDefault(n => MoveNode.IsSameMove(n.Move, move));
+            if (matchingNode is not null) {
+                moveTree.GoTo(matchingNode);
+            } else {
+                break;
+            }
         }
     }
 
@@ -610,9 +631,10 @@ public class ShogiGameService
     /// <summary>現在の位置から再戦（新しいゲームとして開始、MoveTreeをリセット）</summary>
     public async Task RematchFromCurrentPositionAsync()
     {
-        var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
+        var displayHistory = this.State.DisplayBranchHistory;
+        var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
         var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
-        var newHistory = this.State.MoveHistory.Take(viewingIndex).ToImmutableList();
+        var newHistory = displayHistory.Take(viewingIndex).ToImmutableList();
 
         // MoveTreeを新規作成して棋譜を追加
         var newMoveTree = new MoveTree();
@@ -628,7 +650,7 @@ public class ShogiGameService
             MoveHistory = newHistory,
             Status = GameStatus.Playing,
             ViewingMoveIndex = null,
-            IsViewingDifferentBranch = false,
+            ViewingBranchHistory = null,
             MoveTree = newMoveTree
         };
 
@@ -656,7 +678,7 @@ public class ShogiGameService
             [.. moveHistory],
             localPlayer,
             null,
-            false
+            null
         ) { MoveTree = newMoveTree };
 
         await this.NotifyStateChangedAsync();
@@ -680,13 +702,13 @@ public class ShogiGameService
             // 開始位置に移動
             this.State = this.State with {
                 ViewingMoveIndex = 0,
-                IsViewingDifferentBranch = false
+                ViewingBranchHistory = null
             };
         } else {
             // ノードのパスを取得
             var nodeMoves = node.GetMoves();
 
-            // 現在のMoveHistoryと完全に同じか（同じパスかつ同じ長さ）
+            // 現在のMoveHistory（対局中のブランチ）と完全に同じか（同じパスかつ同じ長さ）
             var isExactSamePath = nodeMoves.Count == this.State.MoveHistory.Count &&
                                   nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, this.State.MoveHistory[i])).All(x => x);
 
@@ -694,25 +716,24 @@ public class ShogiGameService
                 // 完全に同じパスなら閲覧モードを解除
                 this.State = this.State with {
                     ViewingMoveIndex = null,
-                    IsViewingDifferentBranch = false
+                    ViewingBranchHistory = null
                 };
             } else {
-                // 現在のMoveHistoryの一部かチェック
+                // 現在のMoveHistory（対局中のブランチ）の一部かチェック
                 var isSamePath = nodeMoves.Count <= this.State.MoveHistory.Count &&
                                  nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, this.State.MoveHistory[i])).All(x => x);
 
                 if (isSamePath) {
-                    // 同じパス上なら閲覧モードで移動
+                    // 同じパス上なら閲覧モードで移動（別ブランチではない）
                     this.State = this.State with {
                         ViewingMoveIndex = node.Depth,
-                        IsViewingDifferentBranch = false
+                        ViewingBranchHistory = null
                     };
                 } else {
-                    // 別の分岐なら、そのパスに切り替え（終端を表示）
+                    // 別の分岐なら、そのパスを閲覧用に設定（終端を表示）
                     this.State = this.State with {
-                        MoveHistory = nodeMoves,
                         ViewingMoveIndex = null,
-                        IsViewingDifferentBranch = true
+                        ViewingBranchHistory = nodeMoves
                     };
                 }
             }
@@ -770,7 +791,7 @@ public class ShogiGameService
     public int GetTotalBranchCount() => this.State.MoveTree.GetAllBranchEndNodes().Count;
 
     public (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) GetBoardAtMove(int moveIndex) =>
-        ReconstructBoard(this.State.MoveHistory.Take(moveIndex));
+        ReconstructBoard(this.State.DisplayBranchHistory.Take(moveIndex));
 
     private static (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) ReconstructBoard(IEnumerable<Move> moves)
     {

@@ -190,7 +190,7 @@
         @if (GameService.State.IsReviewing)
         {
             <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
-            @if (GameService.State.Status == GameStatus.Playing && !GameService.State.IsAtBranchLatest)
+            @if (GameService.State.Status == GameStatus.Playing && !GameService.State.IsAtActiveBranchLatest)
             {
                 <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
             }

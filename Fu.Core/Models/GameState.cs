@@ -81,7 +81,7 @@ public record GameState(
     ImmutableList<Move> MoveHistory,
     Player LocalPlayer,
     int? ViewingMoveIndex = null,
-    bool IsViewingDifferentBranch = false)
+    ImmutableList<Move>? ViewingBranchHistory = null)
 {
     /// <summary>棋譜ツリー（分岐対応）</summary>
     public MoveTree MoveTree { get; init; } = new();
@@ -102,15 +102,22 @@ public record GameState(
     /// <summary>自分の手番かどうか</summary>
     public bool IsMyTurn => this.LocalPlayer == this.CurrentPlayer;
 
+    /// <summary>別のブランチを見ているかどうか</summary>
+    public bool IsViewingDifferentBranch => this.ViewingBranchHistory is not null;
+
+    /// <summary>現在表示中のブランチの棋譜</summary>
+    public ImmutableList<Move> DisplayBranchHistory => this.ViewingBranchHistory ?? this.MoveHistory;
+
     /// <summary>棋譜閲覧モード中かどうか（過去の局面を見ている、または別のブランチを見ている）</summary>
     public bool IsReviewing => this.IsViewingDifferentBranch ||
                                (this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count);
 
-    /// <summary>現在のブランチの最新局面を見ているかどうか</summary>
-    public bool IsAtBranchLatest => !this.ViewingMoveIndex.HasValue || this.ViewingMoveIndex.Value >= this.MoveHistory.Count;
+    /// <summary>対局中のブランチの最新局面を見ているかどうか</summary>
+    public bool IsAtActiveBranchLatest => !this.IsViewingDifferentBranch &&
+                                          (!this.ViewingMoveIndex.HasValue || this.ViewingMoveIndex.Value >= this.MoveHistory.Count);
 
     /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
-    public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.MoveHistory.Count;
+    public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.DisplayBranchHistory.Count;
 
     /// <summary>現在位置に分岐があるか</summary>
     public bool HasBranches => this.MoveTree.HasBranchesAtCurrent;
