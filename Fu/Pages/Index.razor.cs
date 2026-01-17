@@ -467,6 +467,15 @@ public partial class Index : IAsyncDisposable
 
     private async Task OnEvaluationUpdatedAsync()
     {
+        // 詰みが見つかった場合、詰み手順をブランチとして追加（対局中の対戦者以外）
+        if (this.CanShowAllEvaluation &&
+            this.EngineService.MateIn is not null &&
+            !string.IsNullOrEmpty(this.EngineService.PrincipalVariation)) {
+            await this.GameService.AddMateSequenceBranchAsync(
+                this.EngineService.PrincipalVariation,
+                this.GameService.State.DisplayMoveIndex);
+        }
+
         await this.InvokeAsync(this.StateHasChanged);
     }
 

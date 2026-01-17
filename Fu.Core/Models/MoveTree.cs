@@ -117,6 +117,25 @@ public sealed class MoveTree
         }
     }
 
+    /// <summary>手を追加するが現在位置は変更しない（ブランチ追加用）</summary>
+    public MoveNode AddMoveWithoutAdvance(Move move)
+    {
+        if (this.CurrentNode is null) {
+            // ルートに追加（PlayerとCapturedPieceは比較から除外）
+            var existing = this._rootChildren.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, move));
+            if (existing is not null) {
+                return existing;
+            }
+
+            var newNode = new MoveNode(move, null, this._rootChildren.Count);
+            this._rootChildren.Add(newNode);
+            return newNode;
+        }
+        else {
+            return this.CurrentNode.AddChild(move);
+        }
+    }
+
     /// <summary>1手戻る</summary>
     public bool GoBack()
     {

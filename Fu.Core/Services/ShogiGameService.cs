@@ -1097,4 +1097,132 @@ public class ShogiGameService
             ? (board, captured, goteCaptured)
             : (board, senteCaptured, captured);
     }
+
+    /// <summary>USI形式の手順をパースしてMoveTreeにブランチとして追加</summary>
+    /// <param name="usiMoves">USI形式のスペース区切り手順（例: "7g7f 3c3d 2g2f"）</param>
+    /// <param name="branchStartIndex">分岐を開始する手数（現在の表示位置から）</param>
+    /// <returns>追加に成功したか</returns>
+    public async Task<bool> AddMateSequenceBranchAsync(string usiMoves, int branchStartIndex)
+    {
+        if (string.IsNullOrWhiteSpace(usiMoves)) {
+            return false;
+        }
+
+        var moves = usiMoves.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (moves.Length == 0) {
+            return false;
+        }
+
+        // 現在の表示位置の盤面を取得
+        var displayHistory = this.State.DisplayBranchHistory;
+        var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
+        var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
+
+        // MoveTreeで現在位置のノードを取得
+        var currentNode = this.State.MoveTree.CurrentNode;
+
+        // USI形式の手順をパースしてMoveに変換
+        var parsedMoves = new List<Move>();
+        var tempBoard = board;
+        var tempSenteCaptured = senteCaptured;
+        var tempGoteCaptured = goteCaptured;
+        var tempPlayer = currentPlayer;
+
+        foreach (var usiMove in moves) {
+            var move = ParseUsiMove(usiMove, tempBoard, tempPlayer);
+            if (move is null) {
+                return false;
+            }
+
+            // 取った駒を設定
+            if (!move.IsDrop && move.From is { } from) {
+                var targetPiece = tempBoard[move.To];
+                if (targetPiece is not null) {
+                    move = move.WithCapturedPiece(targetPiece.Type);
+                }
+            }
+            move = move.WithPlayer(tempPlayer);
+
+            parsedMoves.Add(move);
+
+            // 盤面を更新
+            (tempBoard, tempSenteCaptured, tempGoteCaptured) = ApplyMove(
+                tempBoard, move, tempPlayer, tempSenteCaptured, tempGoteCaptured);
+            tempPlayer = tempPlayer.GetOpponent();
+        }
+
+        // MoveTreeにブランチとして追加
+        var nodeToAddFrom = currentNode;
+        foreach (var move in parsedMoves) {
+            if (nodeToAddFrom is null) {
+                // ルートから追加
+                nodeToAddFrom = this.State.MoveTree.AddMoveWithoutAdvance(move);
+            } else {
+                nodeToAddFrom = nodeToAddFrom.AddChild(move);
+            }
+        }
+
+        await this.NotifyStateChangedAsync();
+        return true;
+    }
+
+    /// <summary>USI形式の手をMoveにパース</summary>
+    private static Move? ParseUsiMove(string usiMove, Board board, Player player)
+    {
+        if (string.IsNullOrEmpty(usiMove) || usiMove.Length < 4) {
+            return null;
+        }
+
+        // 駒打ち（例: P*3d）
+        if (usiMove.Length >= 4 && usiMove[1] == '*') {
+            var pieceType = UsiCharToPieceType(usiMove[0]);
+            if (pieceType is null) {
+                return null;
+            }
+
+            var toCol = 8 - (usiMove[2] - '1');
+            var toRow = usiMove[3] - 'a';
+            if (toCol is < 0 or > 8 || toRow is < 0 or > 8) {
+                return null;
+            }
+
+            return Move.CreateDrop(new Position(toCol, toRow), pieceType.Value, player);
+        }
+
+        // 通常の移動（例: 7g7f, 7g7f+）
+        var fromCol = 8 - (usiMove[0] - '1');
+        var fromRow = usiMove[1] - 'a';
+        var toCol2 = 8 - (usiMove[2] - '1');
+        var toRow2 = usiMove[3] - 'a';
+
+        if (fromCol is < 0 or > 8 || fromRow is < 0 or > 8 ||
+            toCol2 is < 0 or > 8 || toRow2 is < 0 or > 8) {
+            return null;
+        }
+
+        var isPromotion = usiMove.Length > 4 && usiMove[4] == '+';
+
+        var piece = board[fromCol, fromRow];
+        if (piece is null) {
+            return null;
+        }
+
+        return Move.CreateMove(
+            new Position(fromCol, fromRow),
+            new Position(toCol2, toRow2),
+            piece.Type,
+            isPromotion);
+    }
+
+    private static PieceType? UsiCharToPieceType(char c) => c switch {
+        'P' => PieceType.Pawn,
+        'L' => PieceType.Lance,
+        'N' => PieceType.Knight,
+        'S' => PieceType.Silver,
+        'G' => PieceType.Gold,
+        'B' => PieceType.Bishop,
+        'R' => PieceType.Rook,
+        'K' => PieceType.King,
+        _ => null
+    };
 }
