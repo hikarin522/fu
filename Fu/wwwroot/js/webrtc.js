@@ -205,10 +205,8 @@ async function joinTrysteroRoom(roomId) {
 
             if (dotNetRef) {
                 dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
-
-                if (participants.size <= 1) {
-                    dotNetRef.invokeMethodAsync('OnDataChannelClose');
-                }
+                // 注: ルームは維持し続ける（相手が再接続してくる可能性があるため）
+                // OnDataChannelCloseは呼ばない
             }
         }
     });
