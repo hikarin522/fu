@@ -237,16 +237,12 @@ public class ShogiEngineService : IAsyncDisposable
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
 
-        // キャッシュの深さより浅い結果は無視（キャッシュを超えた場合のみ更新）
-        if (info.Depth.HasValue && info.Depth.Value <= this.Depth) {
-            return;
-        }
+        // 深さがない、または現在より深い場合のみメイン評価値を更新
+        var isNewDepth = info.Depth.HasValue && info.Depth.Value > this.Depth;
 
-        // メインの評価値を更新（multipv=1または指定なしの場合）
-        if (info.MultiPv is null or 1) {
-            if (info.Depth.HasValue) {
-                this.Depth = info.Depth.Value;
-            }
+        // メインの評価値を更新（multipv=1または指定なしの場合、かつ新しい深さの場合）
+        if ((info.MultiPv is null or 1) && isNewDepth) {
+            this.Depth = info.Depth!.Value;
             if (info.Score.HasValue) {
                 this.Evaluation = info.Score.Value;
                 this.MateIn = info.MateIn;
@@ -254,10 +250,12 @@ public class ShogiEngineService : IAsyncDisposable
             if (info.Pv is not null) {
                 this.PrincipalVariation = info.Pv;
             }
+            // 新しい深さになったら候補手をクリア（古い深さの結果を消す）
+            this._candidates.Clear();
         }
 
-        // 候補手リストを更新
-        if (info.MultiPv.HasValue && info.Move is not null) {
+        // 候補手リストを更新（現在の深さ以上の結果のみ）
+        if (info.MultiPv.HasValue && info.Move is not null && info.Depth.HasValue && info.Depth.Value >= this.Depth) {
             this._candidates[info.MultiPv.Value] = new CandidateMove(
                 info.MultiPv.Value,
                 info.Move,

@@ -42,6 +42,13 @@
                         @(mate > 0 ? "先手に詰みあり" : "後手に詰みあり")
                     }
                 </div>
+                @if (ShowMateSequence && !string.IsNullOrEmpty(EngineService.PrincipalVariation))
+                {
+                    <div class="mate-sequence">
+                        <span class="mate-sequence-label">詰み手順:</span>
+                        <span class="mate-sequence-moves">@FormatMateSequence(EngineService.PrincipalVariation)</span>
+                    </div>
+                }
             }
             @if (ShowCandidates && EngineService.Candidates.Count > 0)
             {
@@ -89,6 +96,9 @@
 
     [Parameter]
     public bool ShowCandidates { get; set; } = false;
+
+    [Parameter]
+    public bool ShowMateSequence { get; set; } = false;
 
     private int? Eval => EngineService.Evaluation;
 
@@ -157,5 +167,14 @@
         // 通常の移動（例: 7g7f, 7g7f+）
         var promote = usiMove.Length > 4 && usiMove[4] == '+' ? "成" : "";
         return $"{9 - (usiMove[2] - '1')}{usiMove[3] - 'a' + 1}{promote}({9 - (usiMove[0] - '1')}{usiMove[1] - 'a' + 1})";
+    }
+
+    private static string FormatMateSequence(string pv)
+    {
+        if (string.IsNullOrEmpty(pv)) return "";
+
+        var moves = pv.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var formatted = moves.Select((m, i) => $"{i + 1}.{FormatMove(m)}");
+        return string.Join(" ", formatted);
     }
 }
