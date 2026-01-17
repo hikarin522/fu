@@ -50,6 +50,25 @@ public partial class ConnectionPanel : IDisposable
             var savedNickname = await this.JS.InvokeAsync<string>("NicknameStorage.load");
             if (!string.IsNullOrEmpty(savedNickname)) {
                 this.InputNickname = savedNickname;
+            }
+
+            // sessionStorage から再接続用のルームIDを確認
+            var reconnectRoomId = await this.JS.InvokeAsync<string>("eval", @"
+                (function() {
+                    const roomId = sessionStorage.getItem('reconnect-room-id');
+                    sessionStorage.removeItem('reconnect-room-id');
+                    return roomId || '';
+                })()
+            ");
+
+            if (!string.IsNullOrEmpty(reconnectRoomId) && !string.IsNullOrEmpty(savedNickname)) {
+                // 自動再接続
+                this.InputRoomId = reconnectRoomId;
+                this.Nickname = savedNickname;
+                this.StateHasChanged();
+                await this.JoinRoom();
+            }
+            else {
                 this.StateHasChanged();
             }
         }

@@ -36,6 +36,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public bool IsHost { get; private set; }
     public string? MyPeerId { get; private set; }
     public string? MyNickname { get; private set; }
+    public RoomId? RoomId { get; private set; }
     public IReadOnlyCollection<Participant> Participants => this._participants.Values;
 
     public event Func<Move, Task>? OnMoveReceived;
@@ -63,7 +64,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         this.MyNickname = nickname;
         var id = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom", nickname);
         this.MyPeerId = id;
-        return new RoomId(id);
+        this.RoomId = new RoomId(id);
+        return this.RoomId.Value;
     }
 
     /// <summary>ルームに参加</summary>
@@ -71,6 +73,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     {
         this.IsHost = false;
         this.MyNickname = nickname;
+        this.RoomId = roomId;
         await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId.AsPrimitive(), nickname);
         this.MyPeerId = await jsRuntime.InvokeAsync<string>("WebRtc.getMyPeerId");
     }

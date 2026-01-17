@@ -241,27 +241,4 @@
 
         return usiMove;
     }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && !EngineService.IsAvailable) {
-            // Service Workerが有効になるまでリロードを試みる
-            // 無限ループ防止のため、sessionStorageでリロード回数を制限
-            var shouldReload = await JSRuntime.InvokeAsync<bool>("eval", @"
-                (function() {
-                    const key = 'coi-reload-count';
-                    const count = parseInt(sessionStorage.getItem(key) || '0');
-                    if (count < 2) {
-                        sessionStorage.setItem(key, (count + 1).toString());
-                        return true;
-                    }
-                    return false;
-                })()
-            ");
-            
-            if (shouldReload) {
-                await JSRuntime.InvokeVoidAsync("location.reload");
-            }
-        }
-    }
 }

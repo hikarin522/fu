@@ -21,11 +21,12 @@ async function initShogiEngine() {
             script.onerror = reject;
         });
 
-        // Wait for module to be ready
-        await YaneuraOu.ready;
+        // YaneuraOu is a factory function that returns a module instance
+        // Wait for the module to be ready
+        const yaneuraou = await YaneuraOu();
 
         // Set up message listener
-        YaneuraOu.addMessageListener((line) => {
+        yaneuraou.addMessageListener((line) => {
             console.log('Engine:', line);
             if (dotNetReference) {
                 dotNetReference.invokeMethodAsync('OnEngineMessage', line);
@@ -33,10 +34,10 @@ async function initShogiEngine() {
         });
 
         // Initialize USI
-        YaneuraOu.postMessage('usi');
+        yaneuraou.postMessage('usi');
 
         engineReady = true;
-        engine = YaneuraOu;
+        engine = yaneuraou;
         console.log('YaneuraOu engine initialized');
         return true;
     } catch (error) {

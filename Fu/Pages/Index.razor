@@ -24,7 +24,14 @@
     </header>
 
     <main class="game-main">
-        @if (!string.IsNullOrEmpty(InitError))
+        @if (NeedsReload)
+        {
+            <div class="loading-message">
+                <div class="spinner"></div>
+                <p>評価機能を有効化中...</p>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(InitError))
         {
             <div class="error-message">初期化エラー: @InitError</div>
         }

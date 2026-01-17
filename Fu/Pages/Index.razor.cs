@@ -58,9 +58,18 @@ public partial class Index : IAsyncDisposable
     // 評価バー自体を表示するか（何か1つでも有効なら表示）
     private bool ShowEvaluation => this.ShowAdvantage || this.ShowEvaluationValue || this.ShowHasMate;
 
+    // Cross-Origin Isolationのリロードが必要かどうか
+    private bool NeedsReload { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try {
+            // Cross-Origin Isolationのチェック（Service Workerが有効か）
+            await this.CheckAndReloadForCrossOriginIsolationAsync();
+            if (this.NeedsReload) {
+                return; // リロード中なので以降の初期化をスキップ
+            }
+
             await this.WebRtcService.InitializeAsync();
             this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceivedAsync;
             this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
@@ -309,6 +318,34 @@ public partial class Index : IAsyncDisposable
     private Task GoToLatestAsync() => this.GameService.GoToLatestAsync();
 
     private Task GoToMoveAsync(int moveIndex) => this.GameService.SetViewingMoveIndexAsync(moveIndex);
+
+    /// <summary>Cross-Origin Isolationが無効な場合、Service Workerを有効にするためにリロードする</summary>
+    private async Task CheckAndReloadForCrossOriginIsolationAsync()
+    {
+        // crossOriginIsolatedが有効かチェックし、無効なら自動リロード
+        var shouldReload = await this.JS.InvokeAsync<bool>("eval", @"
+            (function() {
+                // 既にcrossOriginIsolatedなら不要
+                if (window.crossOriginIsolated === true) {
+                    sessionStorage.removeItem('coi-reload-count');
+                    return false;
+                }
+
+                const key = 'coi-reload-count';
+                const count = parseInt(sessionStorage.getItem(key) || '0');
+                if (count < 2) {
+                    sessionStorage.setItem(key, (count + 1).toString());
+                    return true;
+                }
+                return false;
+            })()
+        ");
+
+        if (shouldReload) {
+            this.NeedsReload = true;
+            await this.JS.InvokeVoidAsync("location.reload");
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {

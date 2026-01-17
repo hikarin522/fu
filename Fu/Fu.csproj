@@ -14,7 +14,6 @@
   <Target Name="DownloadExternalLibraries" BeforeTargets="Build">
     <PropertyGroup>
       <YaneuraOuDir>$(MSBuildProjectDirectory)/wwwroot/lib/yaneuraou</YaneuraOuDir>
-      <CoiServiceWorkerFile>$(MSBuildProjectDirectory)/wwwroot/coi-serviceworker.min.js</CoiServiceWorkerFile>
     </PropertyGroup>
 
     <MakeDir Directories="$(YaneuraOuDir)" Condition="!Exists('$(YaneuraOuDir)')" />
@@ -30,12 +29,6 @@
       DestinationFolder="$(YaneuraOuDir)"
       SkipUnchangedFiles="true"
       Condition="!Exists('$(YaneuraOuDir)/yaneuraou.wasm')" />
-
-    <DownloadFile
-      SourceUrl="https://unpkg.com/coi-serviceworker@0.1.7/coi-serviceworker.min.js"
-      DestinationFolder="$(MSBuildProjectDirectory)/wwwroot"
-      SkipUnchangedFiles="true"
-      Condition="!Exists('$(CoiServiceWorkerFile)')" />
   </Target>
 
 </Project>
