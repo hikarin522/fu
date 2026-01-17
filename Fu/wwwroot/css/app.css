@@ -1270,99 +1270,131 @@ a, .btn-link {
     background: #1e1e1e;
     border-radius: 4px;
     color: #d4d4d4;
+    max-height: 400px;
+    overflow-y: auto;
 }
 
-.tree-container {
+/* Git風ツリー */
+.git-tree {
     display: flex;
     flex-direction: column;
-    gap: 2px;
 }
 
-.main-line {
+.git-tree-row {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 2px;
+    min-height: 28px;
 }
 
-.tree-node-container {
-    display: inline-flex;
-    align-items: center;
+.git-graph {
+    flex-shrink: 0;
+    min-width: 20px;
 }
 
-.tree-connector {
-    color: #666;
-    margin: 0 2px;
+.git-graph-svg {
+    display: block;
+    overflow: visible;
 }
 
+.git-tree-content {
+    flex: 1;
+    padding-left: 8px;
+}
+
+/* SVGライン - 色分け */
+.git-line {
+    stroke-width: 2;
+}
+
+.git-line.col-0 { stroke: #4ec9b0; }
+.git-line.col-1 { stroke: #ce9178; }
+.git-line.col-2 { stroke: #dcdcaa; }
+.git-line.col-3 { stroke: #c586c0; }
+.git-line.col-4 { stroke: #9cdcfe; }
+.git-line.col-5 { stroke: #d16969; }
+
+/* ノードの丸 */
+.git-node {
+    stroke-width: 2;
+}
+
+.git-node.col-0 { fill: #1e1e1e; stroke: #4ec9b0; }
+.git-node.col-1 { fill: #1e1e1e; stroke: #ce9178; }
+.git-node.col-2 { fill: #1e1e1e; stroke: #dcdcaa; }
+.git-node.col-3 { fill: #1e1e1e; stroke: #c586c0; }
+.git-node.col-4 { fill: #1e1e1e; stroke: #9cdcfe; }
+.git-node.col-5 { fill: #1e1e1e; stroke: #d16969; }
+
+.git-node.current {
+    fill: #0078d4 !important;
+    stroke: #0078d4 !important;
+}
+
+.git-node.start {
+    fill: #2e7d32 !important;
+    stroke: #4caf50 !important;
+}
+
+.git-node.start.current {
+    fill: #4caf50 !important;
+    stroke: #81c784 !important;
+}
+
+/* 手のテキスト */
 .tree-node {
-    padding: 2px 6px;
+    padding: 2px 8px;
     border-radius: 3px;
     cursor: pointer;
-    background: #2d2d2d;
-    border: 1px solid #404040;
+    background: transparent;
+    border: none;
     white-space: nowrap;
     transition: all 0.15s;
+    color: #d4d4d4;
 }
 
 .tree-node:hover {
     background: #3d3d3d;
-    border-color: #0078d4;
+    color: #fff;
 }
 
 .tree-node.current {
     background: #0078d4;
-    border-color: #0078d4;
     color: white;
     font-weight: bold;
+    border-radius: 3px;
 }
 
 .tree-node.start {
-    background: #2e7d32;
-    border-color: #2e7d32;
-    color: white;
+    color: #4ec9b0;
+    font-weight: bold;
 }
 
 .tree-node.start.current {
-    background: #1b5e20;
-    border-color: #4caf50;
-}
-
-.tree-node.has-branch {
-    border-left: 3px solid #ff9800;
+    background: #2e7d32;
+    color: white;
 }
 
 .tree-node.branch {
-    background: #3d2d2d;
-    border-color: #664040;
+    color: #ce9178;
 }
 
-.tree-node.branch:hover {
-    background: #4d3d3d;
+/* 検討モード */
+.turn-indicator.review-mode {
+    color: #9cdcfe;
+    background: #1e3a5f;
+    padding: 4px 12px;
+    border-radius: 4px;
 }
 
-.tree-node.branch.current {
-    background: #d44000;
-    border-color: #ff6600;
+.btn-review {
+    background: #1e3a5f;
+    color: #9cdcfe;
+    border: 1px solid #3d6a99;
 }
 
-.branch-indicator {
-    color: #ff9800;
-    font-size: 10px;
-    margin-left: 2px;
-}
-
-.branch-line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px;
-    margin-top: 2px;
-}
-
-.branch-connector {
-    color: #ff9800;
-    margin-right: 2px;
+.btn-review:hover {
+    background: #2a4d7a;
+    color: #c9e6ff;
 }
 
 /* Blazor エラー UI */

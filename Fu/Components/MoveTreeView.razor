@@ -3,69 +3,77 @@
 <div class="move-tree-view">
     @if (MoveTree is not null)
     {
-        <div class="tree-container">
-            @* メインライン（分岐インデックス0）を表示 *@
-            @{
-                var mainLine = BuildMainLine();
-                var branchPoints = GetBranchPoints();
-            }
-
-            <div class="main-line">
-                <span class="tree-node start @(DisplayMoveIndex == 0 ? "current" : "")"
-                      @onclick="() => OnNodeClick(null)">開始</span>
-
-                @foreach (var (node, index) in mainLine.Select((n, i) => (n, i)))
-                {
-                    var isCurrent = IsCurrentNode(node);
-                    var hasBranch = node.Parent?.Children.Count > 1 || (node.Parent is null && MoveTree.RootChildren.Count > 1);
-                    var branchCount = node.Parent?.Children.Count ?? MoveTree.RootChildren.Count;
-
-                    <div class="tree-node-container">
-                        <span class="tree-connector">─</span>
-                        <span class="tree-node @(isCurrent ? "current" : "") @(hasBranch ? "has-branch" : "")"
-                              @onclick="() => OnNodeClick(node)"
-                              title="@node.Move.ToNotationWithFrom()">
-                            @((index + 1)). @node.Move.ToNotationWithFrom()
-                        </span>
-
-                        @if (hasBranch && branchCount > 1)
-                        {
-                            <span class="branch-indicator" title="@(branchCount - 1)個の分岐">
-                                ┬@(branchCount - 1)
-                            </span>
-                        }
-                    </div>
-                }
-            </div>
-
-            @* 分岐を表示 *@
-            @foreach (var branchPoint in branchPoints)
+        var allLines = BuildAllLines();
+        <div class="git-tree">
+            @foreach (var (line, lineIndex) in allLines.Select((l, i) => (l, i)))
             {
-                var parentIndex = branchPoint.ParentIndex;
-                var branches = branchPoint.Branches.Skip(1).ToList(); // メインライン以外の分岐
+                <div class="git-tree-row">
+                    @* グラフ部分 *@
+                    <div class="git-graph">
+                        <svg width="@(line.MaxColumn * ColumnWidth + ColumnWidth)" height="@RowHeight" class="git-graph-svg">
+                            @* 縦線（継続線） *@
+                            @foreach (var col in line.ContinuingColumns)
+                            {
+                                <line x1="@(col * ColumnWidth + ColumnWidth / 2)"
+                                      y1="0"
+                                      x2="@(col * ColumnWidth + ColumnWidth / 2)"
+                                      y2="@RowHeight"
+                                      class="git-line col-@(col % 6)" />
+                            }
 
-                @foreach (var (branch, branchIdx) in branches.Select((b, i) => (b, i)))
-                {
-                    <div class="branch-line" style="margin-left: @((parentIndex + 1) * 24 + 12)px;">
-                        <span class="branch-connector">└─</span>
-                        @{
-                            var branchNodes = GetBranchNodes(branch);
-                        }
-                        @foreach (var (node, nodeIdx) in branchNodes.Select((n, i) => (n, i)))
+                            @* 分岐線（親から分岐する場合） *@
+                            @if (line.IsBranch && line.ParentColumn >= 0)
+                            {
+                                <path d="M @(line.ParentColumn * ColumnWidth + ColumnWidth / 2) 0
+                                         L @(line.ParentColumn * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2)
+                                         Q @(line.ParentColumn * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2 + 4)
+                                           @(line.ParentColumn * ColumnWidth + ColumnWidth / 2 + 4) @(RowHeight / 2 + 4)
+                                         L @(line.Column * ColumnWidth + ColumnWidth / 2 - 4) @(RowHeight / 2 + 4)
+                                         Q @(line.Column * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2 + 4)
+                                           @(line.Column * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2 + 8)
+                                         L @(line.Column * ColumnWidth + ColumnWidth / 2) @RowHeight"
+                                      fill="none"
+                                      class="git-line col-@(line.Column % 6)" />
+                            }
+                            else if (line.Node is not null || line.IsStart)
+                            {
+                                @* 通常の縦線 *@
+                                <line x1="@(line.Column * ColumnWidth + ColumnWidth / 2)"
+                                      y1="0"
+                                      x2="@(line.Column * ColumnWidth + ColumnWidth / 2)"
+                                      y2="@RowHeight"
+                                      class="git-line col-@(line.Column % 6)" />
+                            }
+
+                            @* ノードの丸 *@
+                            @if (line.Node is not null || line.IsStart)
+                            {
+                                <circle cx="@(line.Column * ColumnWidth + ColumnWidth / 2)"
+                                        cy="@(RowHeight / 2)"
+                                        r="5"
+                                        class="git-node col-@(line.Column % 6) @(IsCurrentNode(line.Node) ? "current" : "") @(line.IsStart ? "start" : "")" />
+                            }
+                        </svg>
+                    </div>
+
+                    @* 手の表示 *@
+                    <div class="git-tree-content">
+                        @if (line.IsStart)
                         {
-                            var isCurrent = IsCurrentNode(node);
-                            <span class="tree-node branch @(isCurrent ? "current" : "")"
-                                  @onclick="() => OnNodeClick(node)"
-                                  title="@node.Move.ToNotationWithFrom()">
-                                @if (nodeIdx > 0)
-                                {
-                                    <span class="tree-connector">─</span>
-                                }
-                                @((parentIndex + nodeIdx + 2)). @node.Move.ToNotationWithFrom()
+                            <span class="tree-node start @(DisplayMoveIndex == 0 ? "current" : "")"
+                                  @onclick="() => OnNodeClick(null)">開始局面</span>
+                        }
+                        else if (line.Node is not null)
+                        {
+                            var isCurrent = IsCurrentNode(line.Node);
+                            <span class="tree-node @(isCurrent ? "current" : "") @(line.IsBranch ? "branch" : "")"
+                                  @onclick="() => OnNodeClick(line.Node)"
+                                  title="@line.Node.Move.ToNotationWithFrom()">
+                                @(line.Node.Depth). @line.Node.Move.ToNotationWithFrom()
                             </span>
                         }
                     </div>
-                }
+                </div>
             }
         </div>
     }
@@ -77,24 +85,25 @@
     [Parameter] public int DisplayMoveIndex { get; set; }
     [Parameter] public EventCallback<MoveNode?> OnNodeSelected { get; set; }
 
+    private const int ColumnWidth = 20;
+    private const int RowHeight = 28;
+
     private async Task OnNodeClick(MoveNode? node)
     {
         await OnNodeSelected.InvokeAsync(node);
     }
 
     /// <summary>ノードが現在表示中の位置かどうかを判定</summary>
-    private bool IsCurrentNode(MoveNode node)
+    private bool IsCurrentNode(MoveNode? node)
     {
-        if (MoveHistory is null || node.Depth > DisplayMoveIndex) {
+        if (node is null || MoveHistory is null || node.Depth > DisplayMoveIndex) {
             return false;
         }
 
-        // ノードの深さが表示位置と一致し、パスが一致するかチェック
         if (node.Depth != DisplayMoveIndex) {
             return false;
         }
 
-        // ノードのパスとMoveHistoryが一致するかチェック
         var nodePath = node.GetMoves();
         for (int i = 0; i < nodePath.Count && i < MoveHistory.Count; i++) {
             if (nodePath[i] != MoveHistory[i]) {
@@ -104,60 +113,82 @@
         return true;
     }
 
-    private List<MoveNode> BuildMainLine()
+    private record TreeLine(
+        MoveNode? Node,
+        int Column,
+        int MaxColumn,
+        bool IsBranch,
+        int ParentColumn,
+        bool IsStart,
+        HashSet<int> ContinuingColumns
+    );
+
+    private List<TreeLine> BuildAllLines()
     {
         if (MoveTree is null) return [];
 
-        var result = new List<MoveNode>();
-        var children = MoveTree.RootChildren;
+        var lines = new List<TreeLine>();
+        var activeColumns = new HashSet<int>(); // 現在アクティブな列（縦線を引く）
 
-        while (children.Count > 0)
-        {
-            var node = children[0]; // メインラインは常に最初の子
-            result.Add(node);
-            children = node.Children;
-        }
+        // 開始ノード
+        activeColumns.Add(0);
+        lines.Add(new TreeLine(null, 0, 0, false, -1, true, new HashSet<int>(activeColumns)));
 
-        return result;
+        // 全ノードを深さ優先で走査
+        BuildLinesRecursive(MoveTree.RootChildren, 0, -1, lines, activeColumns);
+
+        return lines;
     }
 
-    private List<(int ParentIndex, IReadOnlyList<MoveNode> Branches)> GetBranchPoints()
+    private void BuildLinesRecursive(
+        IReadOnlyList<MoveNode> nodes,
+        int column,
+        int parentColumn,
+        List<TreeLine> lines,
+        HashSet<int> activeColumns)
     {
-        if (MoveTree is null) return [];
-
-        var result = new List<(int, IReadOnlyList<MoveNode>)>();
-
-        // ルートの分岐
-        if (MoveTree.RootChildren.Count > 1)
+        for (int i = 0; i < nodes.Count; i++)
         {
-            result.Add((-1, MoveTree.RootChildren));
-        }
+            var node = nodes[i];
+            var isBranch = i > 0; // 2番目以降は分岐
+            var nodeColumn = isBranch ? GetNextAvailableColumn(activeColumns) : column;
 
-        // メインライン上の分岐点
-        var mainLine = BuildMainLine();
-        for (int i = 0; i < mainLine.Count; i++)
-        {
-            var node = mainLine[i];
-            if (node.Children.Count > 1)
+            if (isBranch)
             {
-                result.Add((i, node.Children));
+                activeColumns.Add(nodeColumn);
+            }
+
+            var maxCol = activeColumns.Count > 0 ? activeColumns.Max() : 0;
+            lines.Add(new TreeLine(
+                node,
+                nodeColumn,
+                maxCol,
+                isBranch,
+                isBranch ? column : parentColumn,
+                false,
+                new HashSet<int>(activeColumns)
+            ));
+
+            // 子ノードを処理
+            if (node.Children.Count > 0)
+            {
+                BuildLinesRecursive(node.Children, nodeColumn, nodeColumn, lines, activeColumns);
+            }
+            else
+            {
+                // 終端ノードの場合、この列を非アクティブに
+                activeColumns.Remove(nodeColumn);
             }
         }
-
-        return result;
     }
 
-    private List<MoveNode> GetBranchNodes(MoveNode startNode)
+    private int GetNextAvailableColumn(HashSet<int> activeColumns)
     {
-        var result = new List<MoveNode> { startNode };
-        var current = startNode;
-
-        while (current.Children.Count > 0)
+        int col = 0;
+        while (activeColumns.Contains(col))
         {
-            current = current.Children[0];
-            result.Add(current);
+            col++;
         }
-
-        return result;
+        return col;
     }
 }

@@ -51,6 +51,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public event Func<GameStateSyncInfo, Task>? OnGameStateSyncReceived;
     public event Func<IReadOnlyList<Move>, Task>? OnBranchResumeReceived;
     public event Func<IReadOnlyList<Move>, Task>? OnRematchReceived;
+    public event Func<IReadOnlyList<Move>, Task>? OnReviewStartReceived;
+    public event Func<Move, Task>? OnReviewMoveReceived;
 
     public async Task InitializeAsync()
     {
@@ -114,6 +116,14 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         this.SendMessageAsync(new RematchMessage(
             moveHistory.Select(m => m.ToDto()).ToArray()
         ));
+
+    public Task SendReviewStartAsync(IEnumerable<Move> moveHistory) =>
+        this.SendMessageAsync(new ReviewStartMessage(
+            moveHistory.Select(m => m.ToDto()).ToArray()
+        ));
+
+    public Task SendReviewMoveAsync(Move move) =>
+        this.SendMessageAsync(new ReviewMoveMessage(move.ToDto()));
 
     private async Task SendMessageAsync<T>(T message) where T : WebRtcMessage
     {
@@ -218,6 +228,12 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                 case "rematch":
                     await this.HandleRematchAsync(message);
                     break;
+                case "reviewStart":
+                    await this.HandleReviewStartAsync(message);
+                    break;
+                case "reviewMove":
+                    await this.HandleReviewMoveAsync(message);
+                    break;
             }
         }
         catch (JsonException) {
@@ -266,6 +282,22 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
         var msg = JsonSerializer.Deserialize<RematchMessage>(message, JsonConfig.Options);
         if (msg is not null && OnRematchReceived is { } handler) {
             await handler(msg.MoveHistory.Select(Move.FromDto).ToList());
+        }
+    }
+
+    private async Task HandleReviewStartAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<ReviewStartMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnReviewStartReceived is { } handler) {
+            await handler(msg.MoveHistory.Select(Move.FromDto).ToList());
+        }
+    }
+
+    private async Task HandleReviewMoveAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<ReviewMoveMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnReviewMoveReceived is { } handler) {
+            await handler(Move.FromDto(msg.Move));
         }
     }
 

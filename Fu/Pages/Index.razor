@@ -16,6 +16,11 @@
                         <span class="check-indicator">王手!</span>
                     }
                     break;
+                case GameStatus.Reviewing:
+                    <span class="turn-indicator review-mode">
+                        検討中 - @(GameService.State.CurrentPlayer == Player.Sente ? "先手" : "後手")番
+                    </span>
+                    break;
                 case var status when status.GetResultMessage() is { } message:
                     <span class="game-result">@message</span>
                     break;
@@ -200,11 +205,17 @@
             @if (GameService.State.Status.IsGameOver())
             {
                 <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
+                <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>
             }
         }
         @if (GameService.State.Status.IsGameOver() && !GameService.State.IsReviewing)
         {
             <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
+            <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>
+        }
+        @if (GameService.State.Status == GameStatus.Reviewing && GameService.State.IsReviewing)
+        {
+            <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
         }
         <MoveTreeView
             MoveTree="GameService.State.MoveTree"

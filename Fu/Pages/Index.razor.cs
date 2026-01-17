@@ -100,8 +100,12 @@ public partial class Index : IAsyncDisposable
             this.WebRtcService.OnGameStateSyncReceived += this.OnGameStateSyncReceivedAsync;
             this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
             this.WebRtcService.OnRematchReceived += this.OnRematchReceivedAsync;
+            this.WebRtcService.OnReviewStartReceived += this.OnReviewStartReceivedAsync;
+            this.WebRtcService.OnReviewMoveReceived += this.OnReviewMoveReceivedAsync;
             this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
             this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
+            this.GameService.OnReviewStartedAsync += this.OnReviewStartedAsync;
+            this.GameService.OnReviewMoveAsync += this.OnReviewMoveAsync;
 
             // エンジン初期化（バックグラウンドで実行）
             _ = this.InitializeEngineAsync();
@@ -441,6 +445,37 @@ public partial class Index : IAsyncDisposable
 
     private Task OnTreeNodeSelected(MoveNode? node) => this.GameService.GoToNodeAsync(node);
 
+    // 検討モード関連
+    private async Task StartReviewFromCurrentAsync()
+    {
+        await this.GameService.StartReviewFromCurrentPositionAsync();
+        // 相手に検討モード開始を通知（イベントハンドラで行う）
+    }
+
+    private async ValueTask OnReviewStartedAsync(ImmutableList<Move> moveHistory)
+    {
+        // 検討モード開始を相手に通知
+        await this.WebRtcService.SendReviewStartAsync(moveHistory);
+    }
+
+    private async ValueTask OnReviewMoveAsync(Move move)
+    {
+        // 検討モードでの手を相手に通知
+        await this.WebRtcService.SendReviewMoveAsync(move);
+    }
+
+    private async Task OnReviewStartReceivedAsync(IReadOnlyList<Move> moveHistory)
+    {
+        await this.GameService.ApplyReviewStartAsync(moveHistory);
+        await this.InvokeAsync(this.StateHasChanged);
+    }
+
+    private async Task OnReviewMoveReceivedAsync(Move move)
+    {
+        await this.GameService.ApplyReviewMoveAsync(move);
+        await this.InvokeAsync(this.StateHasChanged);
+    }
+
     /// <summary>Cross-Origin Isolationが無効な場合、Service Workerを有効にするためにリロードする</summary>
     private async Task CheckAndReloadForCrossOriginIsolationAsync()
     {
@@ -478,8 +513,12 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnGameStateSyncReceived -= this.OnGameStateSyncReceivedAsync;
         this.WebRtcService.OnBranchResumeReceived -= this.OnBranchResumeReceivedAsync;
         this.WebRtcService.OnRematchReceived -= this.OnRematchReceivedAsync;
+        this.WebRtcService.OnReviewStartReceived -= this.OnReviewStartReceivedAsync;
+        this.WebRtcService.OnReviewMoveReceived -= this.OnReviewMoveReceivedAsync;
         this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
         this.GameService.OnBranchResumedAsync -= this.OnBranchResumedAsync;
+        this.GameService.OnReviewStartedAsync -= this.OnReviewStartedAsync;
+        this.GameService.OnReviewMoveAsync -= this.OnReviewMoveAsync;
         this.EngineService.OnEvaluationUpdated -= this.OnEvaluationUpdatedAsync;
         await this.EngineService.DisposeAsync();
         await this.WebRtcService.DisposeAsync();

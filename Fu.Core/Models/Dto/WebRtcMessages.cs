@@ -66,3 +66,13 @@ public sealed record BranchResumeMessage(MoveDto[] MoveHistory) : WebRtcMessage(
 /// 再戦メッセージ（評価値表示をリセットして新しいゲームとして再開）
 /// </summary>
 public sealed record RematchMessage(MoveDto[] MoveHistory) : WebRtcMessage("rematch");
+
+/// <summary>
+/// 検討モード開始メッセージ
+/// </summary>
+public sealed record ReviewStartMessage(MoveDto[] MoveHistory) : WebRtcMessage("reviewStart");
+
+/// <summary>
+/// 検討モードでの手メッセージ
+/// </summary>
+public sealed record ReviewMoveMessage(MoveDto Move) : WebRtcMessage("reviewMove");

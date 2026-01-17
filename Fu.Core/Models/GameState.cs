@@ -8,7 +8,8 @@ public enum GameStatus
     Playing,
     CheckmateSente,  // 先手の勝ち
     CheckmateGote,   // 後手の勝ち
-    Resign
+    Resign,
+    Reviewing        // 検討モード（手番関係なく自由に駒を動かせる）
 }
 
 public static class GameStatusExtensions

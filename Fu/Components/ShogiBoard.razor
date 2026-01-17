@@ -5,45 +5,62 @@
         <svg class="drop-arrows-overlay">
             @foreach (var arrow in GetDropArrows())
             {
-                @* 始点: 持ち駒パネル内の駒位置 *@
-                var isPlayerCaptured = (CandidateMovePlayer == Player.Sente && !IsFlipped) ||
-                                       (CandidateMovePlayer == Player.Gote && IsFlipped);
-                var capturedPieces = isPlayerCaptured
-                    ? (IsFlipped ? DisplayGoteCaptured : DisplaySenteCaptured)
-                    : (IsFlipped ? DisplaySenteCaptured : DisplayGoteCaptured);
+                @* 始点: 候補手のプレイヤーの持ち駒パネル *@
+                @* CandidateMovePlayerの持ち駒パネルが下(player)にあるか上(opponent)にあるか *@
+                @* 下にあるのは: 先手視点(!IsFlipped)なら先手、後手視点(IsFlipped)なら後手 *@
+                var playerAtBottom = IsFlipped ? Player.Gote : Player.Sente;
+                var isDropFromBottom = CandidateMovePlayer == playerAtBottom;
+
+                @* 持ち駒を取得（候補手のプレイヤーの持ち駒） *@
+                var capturedPieces = CandidateMovePlayer == Player.Sente
+                    ? DisplaySenteCaptured
+                    : DisplayGoteCaptured;
 
                 @* 持ち駒パネル内の駒のインデックスを計算 *@
                 var pieceIndex = GetCapturedPieceIndex(capturedPieces, arrow.DropPiece!.Value);
                 if (pieceIndex >= 0)
                 {
-                    @* 座標計算（持ち駒は横並び、各駒約50px幅） *@
-                    var pieceWidth = 50.0;
+                    @* レイアウト定数 *@
+                    var capturedPanelHeight = 68.0; // padding 12*2 + label ~20 + pieces ~24
+                    var gapBetweenElements = 10.0;
+                    var colLabelsHeight = 22.0;
+                    var boardHeight = 450.0;
+
+                    @* 上部パネル（opponent）の下端 *@
+                    var topPanelBottom = capturedPanelHeight;
+                    @* 盤面エリアの開始Y（col-labels top の開始） *@
+                    var boardWrapperTop = topPanelBottom + gapBetweenElements;
+                    @* 盤面のセル開始Y *@
+                    var boardCellsTop = boardWrapperTop + colLabelsHeight;
+
+                    @* 持ち駒の駒のX座標（横並び、各駒約40px幅 + 少し余白） *@
+                    var pieceWidth = 44.0;
                     var panelPadding = 12.0;
                     var x1 = panelPadding + pieceIndex * pieceWidth + pieceWidth / 2;
 
                     @* Y座標: 下のパネルなら下から、上のパネルなら上から *@
-                    @* captured-piecesの高さは約60px、ラベル20px + 駒40px *@
-                    var capturedHeight = 60.0;
-                    var boardAreaTop = capturedHeight + 10; // gap: 10px
-                    var boardAreaHeight = 450.0 + 22; // 盤面 + col-labels
-                    var y1 = isPlayerCaptured
-                        ? boardAreaTop + boardAreaHeight + 10 + capturedHeight / 2  // 下パネル
-                        : capturedHeight / 2;  // 上パネル
+                    double y1;
+                    if (isDropFromBottom)
+                    {
+                        @* 下のパネル: 盤面の下 + gap + パネル内の駒位置 *@
+                        var bottomPanelTop = boardCellsTop + boardHeight + gapBetweenElements;
+                        y1 = bottomPanelTop + capturedPanelHeight / 2;
+                    }
+                    else
+                    {
+                        @* 上のパネル: パネル内の駒位置 *@
+                        y1 = capturedPanelHeight / 2;
+                    }
 
                     @* 移動先: 盤面内の座標 *@
                     var x2 = arrow.ToCol * 50 + 25;
-                    var y2Board = arrow.ToRow * 50 + 25;
-                    var y2 = boardAreaTop + 22 + y2Board; // col-labels(22px)を加算
+                    var y2 = boardCellsTop + arrow.ToRow * 50 + 25;
 
                     var dx = x2 - x1;
                     var dy = y2 - y1;
                     var length = Math.Sqrt(dx * dx + dy * dy);
                     if (length > 0)
                     {
-                        var shortenRatio = 15 / length;
-                        var adjX2 = x2 - dx * shortenRatio;
-                        var adjY2 = y2 - dy * shortenRatio;
-
                         var arrowHeadLength = arrow.StrokeWidth * 2.5;
                         var arrowHeadWidth = arrow.StrokeWidth * 1.5;
                         var unitX = dx / length;
@@ -51,8 +68,9 @@
                         var perpX = -unitY;
                         var perpY = unitX;
 
-                        var baseX = adjX2 - unitX * arrowHeadLength;
-                        var baseY = adjY2 - unitY * arrowHeadLength;
+                        @* 三角形の頂点はマス目の中心(x2, y2)、付け根は頂点から後ろ *@
+                        var baseX = x2 - unitX * arrowHeadLength;
+                        var baseY = y2 - unitY * arrowHeadLength;
 
                         var leftX = baseX + perpX * arrowHeadWidth;
                         var leftY = baseY + perpY * arrowHeadWidth;
@@ -65,7 +83,7 @@
                               stroke-linecap="round"
                               opacity="0.7" />
 
-                        <path d="M @adjX2.ToString("F1") @adjY2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
+                        <path d="M @x2.ToString("F1") @y2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
                               fill="#2266cc"
                               opacity="0.7" />
                     }
@@ -156,13 +174,6 @@
                                 var length = Math.Sqrt(dx * dx + dy * dy);
                                 if (length > 0)
                                 {
-                                    @* 矢印を少し短くして駒と重ならないようにする *@
-                                    var shortenRatio = 15 / length;
-                                    var adjX1 = x1 + dx * shortenRatio;
-                                    var adjY1 = y1 + dy * shortenRatio;
-                                    var adjX2 = x2 - dx * shortenRatio;
-                                    var adjY2 = y2 - dy * shortenRatio;
-
                                     @* 矢印の鏃を計算 *@
                                     var arrowHeadLength = arrow.StrokeWidth * 2.5;
                                     var arrowHeadWidth = arrow.StrokeWidth * 1.5;
@@ -171,9 +182,14 @@
                                     var perpX = -unitY;
                                     var perpY = unitX;
 
-                                    @* 鏃の付け根 *@
-                                    var baseX = adjX2 - unitX * arrowHeadLength;
-                                    var baseY = adjY2 - unitY * arrowHeadLength;
+                                    @* 始点を少し短くして駒と重ならないようにする *@
+                                    var shortenRatio = 15 / length;
+                                    var adjX1 = x1 + dx * shortenRatio;
+                                    var adjY1 = y1 + dy * shortenRatio;
+
+                                    @* 三角形の頂点はマス目の中心(x2, y2)、付け根は頂点から後ろ *@
+                                    var baseX = x2 - unitX * arrowHeadLength;
+                                    var baseY = y2 - unitY * arrowHeadLength;
 
                                     @* 鏃の左右の点 *@
                                     var leftX = baseX + perpX * arrowHeadWidth;
@@ -188,8 +204,8 @@
                                           stroke-linecap="round"
                                           opacity="0.7" />
 
-                                    @* 矢印の鏃（path） *@
-                                    <path d="M @adjX2.ToString("F1") @adjY2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
+                                    @* 矢印の鏃（頂点がマス目の中心） *@
+                                    <path d="M @x2.ToString("F1") @y2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
                                           fill="#2266cc"
                                           opacity="0.7" />
                                 }

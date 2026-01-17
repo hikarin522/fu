@@ -14,12 +14,20 @@ public class ShogiGameService
 
     public event Func<ValueTask>? OnStateChangedAsync;
     public event Func<ImmutableList<Move>, ValueTask>? OnBranchResumedAsync;
+    public event Func<ImmutableList<Move>, ValueTask>? OnReviewStartedAsync;
+    public event Func<Move, ValueTask>? OnReviewMoveAsync;
 
     private ValueTask NotifyStateChangedAsync() =>
         OnStateChangedAsync is { } handler ? handler() : ValueTask.CompletedTask;
 
     private ValueTask NotifyBranchResumedAsync(ImmutableList<Move> moveHistory) =>
         OnBranchResumedAsync is { } handler ? handler(moveHistory) : ValueTask.CompletedTask;
+
+    private ValueTask NotifyReviewStartedAsync(ImmutableList<Move> moveHistory) =>
+        OnReviewStartedAsync is { } handler ? handler(moveHistory) : ValueTask.CompletedTask;
+
+    private ValueTask NotifyReviewMoveAsync(Move move) =>
+        OnReviewMoveAsync is { } handler ? handler(move) : ValueTask.CompletedTask;
 
     public async Task NewGameAsync()
     {
@@ -127,11 +135,16 @@ public class ShogiGameService
 
     public async Task<bool> TryMakeMoveAsync(Move move)
     {
+        // 検討モードの場合は専用メソッドにルーティング
+        if (this.State.Status == GameStatus.Reviewing) {
+            return await this.TryMakeReviewMoveAsync(move);
+        }
+
         if (this.State.Status != GameStatus.Playing) {
             return false;
         }
 
-        // 検討モード中は手を指せない（「ここから再開」を押す必要がある）
+        // 閲覧モード中は手を指せない（「ここから再開」を押す必要がある）
         if (this.State.IsReviewing) {
             return false;
         }
@@ -681,6 +694,291 @@ public class ShogiGameService
         ) { MoveTree = newMoveTree };
 
         await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>現在の位置から検討モードを開始</summary>
+    public async Task StartReviewFromCurrentPositionAsync()
+    {
+        var displayHistory = this.State.DisplayBranchHistory;
+        var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
+        var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
+        var newHistory = displayHistory.Take(viewingIndex).ToImmutableList();
+
+        // 既存のMoveTreeを保持して現在位置に同期
+        var moveTree = this.State.MoveTree;
+        moveTree.GoToStart();
+        foreach (var move in newHistory) {
+            moveTree.AddMove(move);
+        }
+
+        this.State = this.State with {
+            Board = board,
+            SenteCaptured = senteCaptured,
+            GoteCaptured = goteCaptured,
+            CurrentPlayer = currentPlayer,
+            MoveHistory = newHistory,
+            Status = GameStatus.Reviewing,
+            ViewingMoveIndex = null,
+            ViewingBranchHistory = null
+        };
+
+        await this.NotifyReviewStartedAsync(newHistory);
+        await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>リモートからの検討モード開始を適用</summary>
+    public async Task ApplyReviewStartAsync(IReadOnlyList<Move> moveHistory)
+    {
+        var localPlayer = this.State.LocalPlayer;
+        var moveTree = this.State.MoveTree;
+
+        var (board, senteCaptured, goteCaptured, currentPlayer) = ReconstructBoard(moveHistory);
+
+        moveTree.GoToStart();
+        foreach (var move in moveHistory) {
+            moveTree.AddMove(move);
+        }
+
+        this.State = new GameState(
+            board,
+            currentPlayer,
+            GameStatus.Reviewing,
+            senteCaptured,
+            goteCaptured,
+            [.. moveHistory],
+            localPlayer,
+            null,
+            null
+        ) { MoveTree = moveTree };
+
+        await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>検討モードで手を指す（手番関係なく自由に動かせる）</summary>
+    private async Task<bool> TryMakeReviewMoveAsync(Move move)
+    {
+        // 過去の局面を見ている場合は、その位置から分岐を作る
+        if (this.State.IsReviewing) {
+            await this.BranchFromCurrentPositionForReviewAsync();
+        }
+
+        // MoveTreeのCurrentNodeをMoveHistoryと同期する
+        this.SyncMoveTreeToCurrentPosition();
+
+        if (move.IsDrop) {
+            return await this.TryDropPieceForReviewAsync(move);
+        }
+
+        if (move.From is null) {
+            return false;
+        }
+
+        var from = move.From.Value;
+        var to = move.To;
+        var piece = this.State.Board[from];
+
+        if (piece is null) {
+            return false;
+        }
+
+        // 検討モードでは手番関係なく動かせる
+        var player = piece.Owner;
+        var legalMoves = this.GetLegalMovesForPlayer(from, player);
+        if (!legalMoves.Contains(to)) {
+            return false;
+        }
+
+        var captured = this.State.Board[to];
+        var newCaptured = this.State.GetCapturedPieces(player);
+        var moveToRecord = move.WithPlayer(player);
+
+        if (captured is not null) {
+            newCaptured = newCaptured.Add(captured.Type);
+            moveToRecord = moveToRecord.WithCapturedPiece(captured.Type);
+        }
+
+        var newPiece = move.IsPromotion && piece.Type.CanPromote()
+            ? piece with { Type = piece.Type.GetPromotedType() }
+            : piece;
+
+        this.State.MoveTree.AddMove(moveToRecord);
+
+        var newState = this.State with {
+            Board = this.State.Board.MovePiece(from, to, newPiece),
+            MoveHistory = this.State.MoveHistory.Add(moveToRecord),
+            CurrentPlayer = player.GetOpponent(),
+            ViewingMoveIndex = null
+        };
+        newState = newState.WithCapturedPieces(player, newCaptured);
+
+        this.State = newState;
+
+        await this.NotifyReviewMoveAsync(moveToRecord);
+        await this.NotifyStateChangedAsync();
+        return true;
+    }
+
+    /// <summary>検討モード用の駒打ち</summary>
+    private async Task<bool> TryDropPieceForReviewAsync(Move move)
+    {
+        // 検討モードでは現在の手番のプレイヤーの持ち駒を使う
+        var player = this.State.CurrentPlayer;
+        var captured = this.State.GetCapturedPieces(player);
+        if (captured.GetCount(move.PieceType) <= 0) {
+            return false;
+        }
+
+        var legalPositions = this.GetLegalDropPositionsForPlayer(move.PieceType, player);
+        if (!legalPositions.Contains(move.To)) {
+            return false;
+        }
+
+        var newCaptured = captured.TryRemove(move.PieceType);
+        if (newCaptured is null) {
+            return false;
+        }
+
+        var moveToRecord = move.WithPlayer(player);
+        this.State.MoveTree.AddMove(moveToRecord);
+
+        var newState = this.State with {
+            Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, player)),
+            MoveHistory = this.State.MoveHistory.Add(moveToRecord),
+            CurrentPlayer = player.GetOpponent(),
+            ViewingMoveIndex = null
+        };
+        newState = newState.WithCapturedPieces(player, newCaptured);
+
+        this.State = newState;
+
+        await this.NotifyReviewMoveAsync(moveToRecord);
+        await this.NotifyStateChangedAsync();
+        return true;
+    }
+
+    /// <summary>検討モード用：現在位置から分岐を作成</summary>
+    private async Task BranchFromCurrentPositionForReviewAsync()
+    {
+        var displayHistory = this.State.DisplayBranchHistory;
+        var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
+        this.State.MoveTree.GoToStart();
+        for (var i = 0; i < viewingIndex; i++) {
+            this.State.MoveTree.AddMove(displayHistory[i]);
+        }
+
+        var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
+        var newHistory = displayHistory.Take(viewingIndex).ToImmutableList();
+
+        this.State = this.State with {
+            Board = board,
+            SenteCaptured = senteCaptured,
+            GoteCaptured = goteCaptured,
+            CurrentPlayer = currentPlayer,
+            MoveHistory = newHistory,
+            ViewingMoveIndex = null,
+            ViewingBranchHistory = null
+        };
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>リモートからの検討モードの手を適用</summary>
+    public async Task ApplyReviewMoveAsync(Move move)
+    {
+        // 検討モードでなければ無視
+        if (this.State.Status != GameStatus.Reviewing) {
+            return;
+        }
+
+        // MoveTreeのCurrentNodeを同期
+        this.SyncMoveTreeToCurrentPosition();
+
+        var player = move.Player;
+        var captured = this.State.Board[move.To];
+        var newCaptured = this.State.GetCapturedPieces(player);
+
+        if (move.IsDrop) {
+            var droppedCaptured = newCaptured.TryRemove(move.PieceType);
+            if (droppedCaptured is null) {
+                return;
+            }
+
+            this.State.MoveTree.AddMove(move);
+
+            var newState = this.State with {
+                Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, player)),
+                MoveHistory = this.State.MoveHistory.Add(move),
+                CurrentPlayer = player.GetOpponent(),
+                ViewingMoveIndex = null
+            };
+            newState = newState.WithCapturedPieces(player, droppedCaptured);
+
+            this.State = newState;
+        } else if (move.From is { } from) {
+            var piece = this.State.Board[from];
+            if (piece is null) {
+                return;
+            }
+
+            if (captured is not null) {
+                newCaptured = newCaptured.Add(captured.Type);
+            }
+
+            var newPiece = move.IsPromotion && piece.Type.CanPromote()
+                ? piece with { Type = piece.Type.GetPromotedType() }
+                : piece;
+
+            this.State.MoveTree.AddMove(move);
+
+            var newState = this.State with {
+                Board = this.State.Board.MovePiece(from, move.To, newPiece),
+                MoveHistory = this.State.MoveHistory.Add(move),
+                CurrentPlayer = player.GetOpponent(),
+                ViewingMoveIndex = null
+            };
+            newState = newState.WithCapturedPieces(player, newCaptured);
+
+            this.State = newState;
+        }
+
+        await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>指定したプレイヤーの合法手を取得</summary>
+    public List<Position> GetLegalMovesForPlayer(Position from, Player player)
+    {
+        var piece = this.State.Board[from];
+        if (piece is null || piece.Owner != player) {
+            return [];
+        }
+
+        var moves = GetPossibleMovesOnBoard(this.State.Board, from, piece);
+        return [.. moves.Where(to => !WouldBeInCheck(this.State.Board, from, to, player))];
+    }
+
+    /// <summary>指定したプレイヤーの合法打ち位置を取得</summary>
+    public List<Position> GetLegalDropPositionsForPlayer(PieceType pieceType, Player player)
+    {
+        return [.. Board.AllPositions.Where(pos => this.CanDropAtForPlayer(pos, pieceType, player))];
+    }
+
+    private bool CanDropAtForPlayer(Position pos, PieceType pieceType, Player player)
+    {
+        if (this.State.Board[pos] is not null) {
+            return false;
+        }
+
+        if (pieceType == PieceType.Pawn && this.State.Board.HasPawnInColumn(pos.Col, player)) {
+            return false;
+        }
+
+        if (!CanExistAtRow(pieceType, pos.Row, player)) {
+            return false;
+        }
+
+        // 打ち歩詰めチェック（簡略化）
+        var testBoard = this.State.Board.SetPiece(pos, new Piece(pieceType, player));
+        return !IsInCheck(testBoard, player);
     }
 
     public async Task SetViewingMoveIndexAsync(int moveIndex)
