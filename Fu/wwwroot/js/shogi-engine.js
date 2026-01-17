@@ -110,6 +110,7 @@ function boardToSfen(boardData, currentPlayer, senteCaptured, goteCaptured, move
 }
 
 // Request evaluation for a position
+// depth: null or 0 = infinite search, positive number = depth limit
 function requestEvaluation(sfen, depth) {
     if (!engine || !engineReady) {
         console.warn('Engine not ready');
@@ -122,8 +123,13 @@ function requestEvaluation(sfen, depth) {
     // Set position
     engine.postMessage('position sfen ' + sfen);
 
-    // Start search with specified depth
-    engine.postMessage('go depth ' + (depth || 10));
+    // Start search
+    if (depth && depth > 0) {
+        engine.postMessage('go depth ' + depth);
+    } else {
+        // Infinite search until stopped
+        engine.postMessage('go infinite');
+    }
 
     return true;
 }

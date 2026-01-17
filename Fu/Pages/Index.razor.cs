@@ -292,12 +292,12 @@ public partial class Index : IAsyncDisposable
         // 観戦者または対局終了後は候補手を3つ表示
         var multiPv = this.ShowCandidateArrows ? 3 : 1;
 
+        // depth: 0 = 無限探索（局面が変わるまで継続）
         await this.EngineService.AnalyzePositionAsync(
             board,
             currentPlayer,
             senteCaptured,
             goteCaptured,
-            depth: 15,
             multiPv: multiPv);
     }
 

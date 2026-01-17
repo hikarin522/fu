@@ -66,26 +66,67 @@
                 {
                     var arrows = GetCandidateArrows().ToList();
                     <svg class="candidate-arrows-overlay" viewBox="0 0 450 450" preserveAspectRatio="none">
-                        @for (var index = 0; index < arrows.Count; index++)
+                        @foreach (var arrow in arrows)
                         {
-                            var arrow = arrows[index];
+                            @* 移動先の座標 *@
+                            var x2 = arrow.ToCol * 50 + 25;
+                            var y2 = arrow.ToRow * 50 + 25;
+
                             @if (arrow.IsDrop)
                             {
-                                @* 駒打ちはマーカー（円）で表示 *@
-                                var cx = arrow.ToCol * 50 + 25;
-                                var cy = arrow.ToRow * 50 + 25;
-                                var radius = 12 + arrow.StrokeWidth;
-                                <circle cx="@cx" cy="@cy" r="@radius"
-                                        fill="none" stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
-                                        opacity="0.7" />
+                                @* 駒打ちは持ち駒パネル側から矢印を引く *@
+                                @* 手番と盤面反転状態から始点を決定 *@
+                                var isPlayerCaptured = (CandidateMovePlayer == Player.Sente && !IsFlipped) ||
+                                                       (CandidateMovePlayer == Player.Gote && IsFlipped);
+                                var x1 = (double)x2;
+                                var y1 = isPlayerCaptured ? 450.0 : 0.0;
+
+                                var dx = x2 - x1;
+                                var dy = y2 - y1;
+                                var length = Math.Sqrt(dx * dx + dy * dy);
+                                if (length > 0)
+                                {
+                                    @* 矢印を少し短くして駒と重ならないようにする *@
+                                    var shortenRatio = 15 / length;
+                                    var adjX2 = x2 - dx * shortenRatio;
+                                    var adjY2 = y2 - dy * shortenRatio;
+
+                                    @* 矢印の鏃を計算 *@
+                                    var arrowHeadLength = arrow.StrokeWidth * 2.5;
+                                    var arrowHeadWidth = arrow.StrokeWidth * 1.5;
+                                    var unitX = dx / length;
+                                    var unitY = dy / length;
+                                    var perpX = -unitY;
+                                    var perpY = unitX;
+
+                                    @* 鏃の付け根 *@
+                                    var baseX = adjX2 - unitX * arrowHeadLength;
+                                    var baseY = adjY2 - unitY * arrowHeadLength;
+
+                                    @* 鏃の左右の点 *@
+                                    var leftX = baseX + perpX * arrowHeadWidth;
+                                    var leftY = baseY + perpY * arrowHeadWidth;
+                                    var rightX = baseX - perpX * arrowHeadWidth;
+                                    var rightY = baseY - perpY * arrowHeadWidth;
+
+                                    @* 矢印の本体（線） *@
+                                    <line x1="@x1.ToString("F1")" y1="@y1.ToString("F1")"
+                                          x2="@baseX.ToString("F1")" y2="@baseY.ToString("F1")"
+                                          stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
+                                          stroke-linecap="round"
+                                          opacity="0.7" />
+
+                                    @* 矢印の鏃（path） *@
+                                    <path d="M @adjX2.ToString("F1") @adjY2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
+                                          fill="#2266cc"
+                                          opacity="0.7" />
+                                }
                             }
                             else
                             {
                                 @* 通常の移動は矢印で表示 *@
                                 var x1 = arrow.FromCol * 50 + 25;
                                 var y1 = arrow.FromRow * 50 + 25;
-                                var x2 = arrow.ToCol * 50 + 25;
-                                var y2 = arrow.ToRow * 50 + 25;
 
                                 var dx = x2 - x1;
                                 var dy = y2 - y1;

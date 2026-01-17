@@ -118,7 +118,8 @@
                     GameService="GameService"
                     OnMoveMade="OnMoveMade"
                     IsFlipped="IsFlipped"
-                    CandidateMoves="@(ShowCandidateArrows ? EngineService.Candidates : null)" />
+                    CandidateMoves="@(ShowCandidateArrows ? EngineService.Candidates : null)"
+                    CandidateMovePlayer="GameService.State.CurrentPlayer" />
 
                 <div class="player-info self">
                     <span class="player-label">

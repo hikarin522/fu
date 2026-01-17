@@ -16,6 +16,9 @@ public partial class ShogiBoard
     /// <summary>候補手リスト（観戦者向け矢印表示用）</summary>
     [Parameter] public IReadOnlyList<CandidateMove>? CandidateMoves { get; set; }
 
+    /// <summary>候補手の手番（駒打ち矢印の始点判定用）</summary>
+    [Parameter] public Player CandidateMovePlayer { get; set; } = Player.Sente;
+
     private Position? SelectedPosition { get; set; }
     private List<Position> LegalMoves { get; set; } = [];
     private bool ShowPromotionDialog { get; set; }
@@ -241,27 +244,32 @@ public partial class ShogiBoard
             yield break;
         }
 
-        // 太さで順位を表現: 1位=10, 2位=6, 3位=3
-        var strokeWidths = new[] { 10, 6, 3 };
+        // 太さで順位を表現: 1位=6, 2位=4, 3位=2
+        var strokeWidths = new[] { 6, 4, 2 };
 
         foreach (var candidate in this.CandidateMoves.Take(3)) {
             if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) {
                 continue;
             }
-            var (from, to) = move;
+            var (from, to, dropPiece) = move;
 
             var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
             var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
 
             if (from is { } f) {
                 var fromDisplay = this.IsFlipped ? (8 - f.col, 8 - f.row) : (f.col, f.row);
-                yield return new ArrowData(fromDisplay.Item1, fromDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, false);
+                yield return new ArrowData(fromDisplay.Item1, fromDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, null);
             }
-            else {
-                yield return new ArrowData(toDisplay.Item1, toDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, true);
+            else if (dropPiece is { } piece) {
+                // 駒打ちの場合、駒種類を渡す
+                yield return new ArrowData(0, 0, toDisplay.Item1, toDisplay.Item2, strokeWidth, piece);
             }
         }
     }
 
-    private sealed record ArrowData(int FromCol, int FromRow, int ToCol, int ToRow, int StrokeWidth, bool IsDrop);
+    /// <summary>駒打ちの駒種類（SFEN形式の大文字: P, L, N, S, G, B, R）、駒打ちでない場合はnull</summary>
+    private sealed record ArrowData(int FromCol, int FromRow, int ToCol, int ToRow, int StrokeWidth, char? DropPiece)
+    {
+        public bool IsDrop => this.DropPiece is not null;
+    }
 }

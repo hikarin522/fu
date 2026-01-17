@@ -16,6 +16,18 @@ public record CandidateMove(
 );
 
 /// <summary>
+/// 局面のキャッシュされた評価情報
+/// </summary>
+public record CachedEvaluation(
+    int? Evaluation,
+    int? MateIn,
+    string? BestMove,
+    string? PrincipalVariation,
+    int Depth,
+    IReadOnlyList<CandidateMove> Candidates
+);
+
+/// <summary>
 /// YaneuraOu WASM エンジンとのインターフェース
 /// </summary>
 public class ShogiEngineService : IAsyncDisposable
@@ -25,6 +37,11 @@ public class ShogiEngineService : IAsyncDisposable
     private bool _initialized;
     private bool _isAnalyzing;
     private readonly Dictionary<int, CandidateMove> _candidates = [];
+
+    // 局面キャッシュ（SFEN -> 評価情報）
+    private readonly Dictionary<string, CachedEvaluation> _cache = [];
+    private const int MaxCacheSize = 100;
+    private string? _currentSfen;
 
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
@@ -95,22 +112,81 @@ public class ShogiEngineService : IAsyncDisposable
     }
 
     /// <summary>局面を分析</summary>
-    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 10, int multiPv = 1)
+    /// <param name="depth">探索深さ（0 = 無限探索）</param>
+    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 0, int multiPv = 1)
     {
         if (!this.IsAvailable) {
             return;
         }
 
         var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
+        this._currentSfen = sfen;
+
+        // キャッシュをチェック
+        if (this._cache.TryGetValue(sfen, out var cached)) {
+            // キャッシュから復元（即座に表示）
+            this.RestoreFromCache(cached);
+            if (OnEvaluationUpdated is { } h) {
+                await h();
+            }
+            // 無限探索の場合は継続、深さ指定の場合はキャッシュ深さ以上ならスキップ
+            if (depth > 0 && cached.Depth >= depth) {
+                return;
+            }
+        }
+        else {
+            // 新規局面は初期化
+            this._candidates.Clear();
+        }
+
         this._isAnalyzing = true;
-        this._candidates.Clear();
 
         // MultiPVを設定
         if (multiPv > 1) {
             await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
         }
 
+        // depth=0 で無限探索
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
+    }
+
+    private void RestoreFromCache(CachedEvaluation cached)
+    {
+        this.Evaluation = cached.Evaluation;
+        this.MateIn = cached.MateIn;
+        this.BestMove = cached.BestMove;
+        this.PrincipalVariation = cached.PrincipalVariation;
+        this.Depth = cached.Depth;
+        this._candidates.Clear();
+        foreach (var candidate in cached.Candidates) {
+            this._candidates[candidate.Rank] = candidate;
+        }
+    }
+
+    private void SaveToCache(string sfen)
+    {
+        // キャッシュサイズ制限
+        if (this._cache.Count >= MaxCacheSize) {
+            // 最も古いエントリを削除（簡易的な実装）
+            var oldestKey = this._cache.Keys.First();
+            this._cache.Remove(oldestKey);
+        }
+
+        this._cache[sfen] = new CachedEvaluation(
+            this.Evaluation,
+            this.MateIn,
+            this.BestMove,
+            this.PrincipalVariation,
+            this.Depth,
+            this.Candidates
+        );
+    }
+
+    /// <summary>指定した局面のキャッシュを取得</summary>
+    public CachedEvaluation? GetCachedEvaluation(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
+    {
+        var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
+        return this._cache.GetValueOrDefault(sfen);
     }
 
     /// <summary>分析を停止</summary>
@@ -141,6 +217,12 @@ public class ShogiEngineService : IAsyncDisposable
                 this.BestMove = parts[1];
             }
             this._isAnalyzing = false;
+
+            // 探索完了時にキャッシュに保存
+            if (this._currentSfen is not null) {
+                this.SaveToCache(this._currentSfen);
+            }
+
             if (OnEvaluationUpdated is { } handler) {
                 await handler();
             }
@@ -151,6 +233,11 @@ public class ShogiEngineService : IAsyncDisposable
     {
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
+
+        // キャッシュの深さより浅い結果は無視（キャッシュを超えた場合のみ更新）
+        if (info.Depth.HasValue && info.Depth.Value <= this.Depth) {
+            return;
+        }
 
         // メインの評価値を更新（multipv=1または指定なしの場合）
         if (info.MultiPv is null or 1) {
@@ -294,8 +381,8 @@ public class ShogiEngineService : IAsyncDisposable
 
     /// <summary>SFEN形式の指し手をパースして移動元・移動先の座標を返す</summary>
     /// <param name="sfenMove">SFEN形式の指し手（例: 7g7f, G*5b）</param>
-    /// <returns>移動元（駒打ちの場合はnull）、移動先のタプル。パース失敗時はnull</returns>
-    public static ((int col, int row)? from, (int col, int row) to)? ParseSfenMove(string sfenMove)
+    /// <returns>移動元（駒打ちの場合はnull）、移動先、駒打ちの駒種類（打ちでない場合はnull）のタプル。パース失敗時はnull</returns>
+    public static ((int col, int row)? from, (int col, int row) to, char? dropPiece)? ParseSfenMove(string sfenMove)
     {
         if (string.IsNullOrEmpty(sfenMove)) {
             return null;
@@ -307,7 +394,7 @@ public class ShogiEngineService : IAsyncDisposable
             var toRow = sfenMove[3] - 'a';
             if (toCol is >= 0 and < 9 && toRow is >= 0 and < 9) {
                 // SFEN列は1-9、内部は0-8。SFEN 1 = 内部 8, SFEN 9 = 内部 0
-                return (null, (8 - toCol, toRow));
+                return (null, (8 - toCol, toRow), char.ToUpperInvariant(sfenMove[0]));
             }
             return null;
         }
@@ -321,7 +408,7 @@ public class ShogiEngineService : IAsyncDisposable
 
             if (fromCol is >= 0 and < 9 && fromRow is >= 0 and < 9 &&
                 toCol is >= 0 and < 9 && toRow is >= 0 and < 9) {
-                return ((8 - fromCol, fromRow), (8 - toCol, toRow));
+                return ((8 - fromCol, fromRow), (8 - toCol, toRow), null);
             }
         }
 
