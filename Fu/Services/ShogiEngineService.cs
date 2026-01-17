@@ -303,6 +303,42 @@ public class ShogiEngineService : IAsyncDisposable
         return sb.ToString();
     }
 
+    /// <summary>SFEN形式の指し手をパースして移動元・移動先の座標を返す</summary>
+    /// <param name="sfenMove">SFEN形式の指し手（例: 7g7f, G*5b）</param>
+    /// <returns>移動元（駒打ちの場合はnull）、移動先のタプル。パース失敗時はnull</returns>
+    public static ((int col, int row)? from, (int col, int row) to)? ParseSfenMove(string sfenMove)
+    {
+        if (string.IsNullOrEmpty(sfenMove)) {
+            return null;
+        }
+
+        // 駒打ちの場合（例: G*5b）
+        if (sfenMove.Length >= 4 && sfenMove[1] == '*') {
+            var toCol = sfenMove[2] - '1';
+            var toRow = sfenMove[3] - 'a';
+            if (toCol is >= 0 and < 9 && toRow is >= 0 and < 9) {
+                // SFEN列は1-9、内部は0-8。SFEN 1 = 内部 8, SFEN 9 = 内部 0
+                return (null, (8 - toCol, toRow));
+            }
+            return null;
+        }
+
+        // 通常の移動（例: 7g7f, 7g7f+）
+        if (sfenMove.Length >= 4) {
+            var fromCol = sfenMove[0] - '1';
+            var fromRow = sfenMove[1] - 'a';
+            var toCol = sfenMove[2] - '1';
+            var toRow = sfenMove[3] - 'a';
+
+            if (fromCol is >= 0 and < 9 && fromRow is >= 0 and < 9 &&
+                toCol is >= 0 and < 9 && toRow is >= 0 and < 9) {
+                return ((8 - fromCol, fromRow), (8 - toCol, toRow));
+            }
+        }
+
+        return null;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (this.IsAvailable) {

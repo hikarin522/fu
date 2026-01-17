@@ -176,6 +176,18 @@ a, .btn-link {
     background: var(--board-color);
     border: 3px solid var(--board-line);
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    position: relative;
+}
+
+/* 候補手矢印オーバーレイ */
+.candidate-arrows-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc(var(--cell-size) * 9);
+    height: calc(var(--cell-size) * 9);
+    pointer-events: none;
+    z-index: 10;
 }
 
 .board-row {
@@ -857,7 +869,14 @@ a, .btn-link {
     margin-top: 20px;
 }
 
-/* 観戦中表示 */
+/* 観戦者コントロール */
+.spectator-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    justify-content: center;
+}
+
 .spectator-notice {
     background: #ff9800;
     color: white;

@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
+  <PropertyGroup>
+    <!-- Disable fingerprinting to work with static hosting (GitHub Pages) -->
+    <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Fu.Core\Fu.Core.csproj" />
   </ItemGroup>

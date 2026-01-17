@@ -60,6 +60,67 @@
                         }
                     </div>
                 }
+
+                @* 候補手の矢印オーバーレイ *@
+                @if (CandidateMoves?.Count > 0)
+                {
+                    var arrows = GetCandidateArrows().ToList();
+                    <svg class="candidate-arrows-overlay" viewBox="0 0 450 450" preserveAspectRatio="none">
+                        <defs>
+                            @for (var index = 0; index < arrows.Count; index++)
+                            {
+                                var arrow = arrows[index];
+                                <marker id="arrowhead-@index"
+                                        markerWidth="10" markerHeight="7"
+                                        refX="9" refY="3.5"
+                                        orient="auto"
+                                        fill="@arrow.Color">
+                                    <polygon points="0 0, 10 3.5, 0 7" />
+                                </marker>
+                            }
+                        </defs>
+                        @for (var index = 0; index < arrows.Count; index++)
+                        {
+                            var arrow = arrows[index];
+                            @if (arrow.IsDrop)
+                            {
+                                @* 駒打ちはマーカー（円）で表示 *@
+                                var cx = arrow.ToCol * 50 + 25;
+                                var cy = arrow.ToRow * 50 + 25;
+                                <circle cx="@cx" cy="@cy" r="18"
+                                        fill="none" stroke="@arrow.Color" stroke-width="4"
+                                        opacity="0.7" />
+                            }
+                            else
+                            {
+                                @* 通常の移動は矢印で表示 *@
+                                var x1 = arrow.FromCol * 50 + 25;
+                                var y1 = arrow.FromRow * 50 + 25;
+                                var x2 = arrow.ToCol * 50 + 25;
+                                var y2 = arrow.ToRow * 50 + 25;
+
+                                @* 矢印を少し短くして駒と重ならないようにする *@
+                                var dx = x2 - x1;
+                                var dy = y2 - y1;
+                                var length = Math.Sqrt(dx * dx + dy * dy);
+                                if (length > 0)
+                                {
+                                    var shortenRatio = 15 / length;
+                                    var adjX1 = x1 + dx * shortenRatio;
+                                    var adjY1 = y1 + dy * shortenRatio;
+                                    var adjX2 = x2 - dx * shortenRatio;
+                                    var adjY2 = y2 - dy * shortenRatio;
+
+                                    <line x1="@adjX1.ToString("F1")" y1="@adjY1.ToString("F1")"
+                                          x2="@adjX2.ToString("F1")" y2="@adjY2.ToString("F1")"
+                                          stroke="@arrow.Color" stroke-width="6"
+                                          marker-end="url(#arrowhead-@index)"
+                                          opacity="0.7" />
+                                }
+                            }
+                        }
+                    </svg>
+                }
             </div>
         </div>
     </div>

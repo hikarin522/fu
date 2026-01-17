@@ -20,7 +20,14 @@ public partial class Index : IAsyncDisposable
 
     [Parameter] public string? RoomIdParam { get; set; }
 
-    private bool IsFlipped => this.GameService.State.LocalPlayer == Player.Gote;
+    // 観戦者用の盤面反転状態
+    private bool SpectatorFlipped { get; set; }
+
+    // 対局者は自分が後手なら反転、観戦者は手動切り替え
+    private bool IsFlipped => this.IsPlayer
+        ? this.GameService.State.LocalPlayer == Player.Gote
+        : this.SpectatorFlipped;
+
     private string? InitError { get; set; }
     private string BaseUrl => this.Navigation.BaseUri;
 
@@ -49,14 +56,20 @@ public partial class Index : IAsyncDisposable
                              this.WebRtcService.MyPeerId == this.GotePeerId;
     private bool IsSpectator => !this.IsPlayer && this.GameService.State.Status == GameStatus.Playing;
 
-    // 評価値表示の各要素が有効か（観戦者は常に全表示、対局者はオプション次第）
-    private bool ShowAdvantage => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
-    private bool ShowEvaluationValue => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
-    private bool ShowHasMate => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
-    private bool ShowMateCount => this.IsSpectator || (this.IsPlayer && this.CurrentEvaluationOptions.ShowMateCount);
+    // 対局が終了したか（勝敗が決まった状態）
+    private bool IsGameEnded => this.GameService.State.Status.IsGameOver();
+
+    // 評価値表示の各要素が有効か（観戦者・対局終了後は常に全表示、対局中の対局者はオプション次第）
+    private bool ShowAdvantage => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
+    private bool ShowEvaluationValue => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
+    private bool ShowHasMate => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
+    private bool ShowMateCount => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowMateCount);
 
     // 評価バー自体を表示するか（何か1つでも有効なら表示）
     private bool ShowEvaluation => this.ShowAdvantage || this.ShowEvaluationValue || this.ShowHasMate;
+
+    // 候補手矢印を表示するか（観戦者または対局終了後）
+    private bool ShowCandidateArrows => this.IsSpectator || this.IsGameEnded;
 
     // Cross-Origin Isolationのリロードが必要かどうか
     private bool NeedsReload { get; set; }
@@ -286,8 +299,8 @@ public partial class Index : IAsyncDisposable
             ? this.GameService.GetBoardAtMove(state.DisplayMoveIndex)
             : (state.Board, state.SenteCaptured, state.GoteCaptured, state.CurrentPlayer);
 
-        // 観戦者の場合は候補手を3つ表示
-        var multiPv = this.IsSpectator ? 3 : 1;
+        // 観戦者または対局終了後は候補手を3つ表示
+        var multiPv = this.ShowCandidateArrows ? 3 : 1;
 
         await this.EngineService.AnalyzePositionAsync(
             board,
@@ -296,6 +309,11 @@ public partial class Index : IAsyncDisposable
             goteCaptured,
             depth: 15,
             multiPv: multiPv);
+    }
+
+    private void ToggleBoardFlip()
+    {
+        this.SpectatorFlipped = !this.SpectatorFlipped;
     }
 
     private async Task DownloadKifAsync()

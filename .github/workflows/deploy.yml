@@ -35,6 +35,61 @@ jobs:
       - name: Publish
         run: dotnet publish Fu/Fu.csproj -c Release -o publish --no-build
 
+      - name: Generate blazor.boot.json for static hosting
+        run: |
+          # .NET 10 uses staticwebassets.endpoints.json instead of blazor.boot.json
+          # Generate blazor.boot.json from endpoints file for GitHub Pages compatibility
+          python3 << 'EOF'
+          import json
+          import os
+
+          endpoints_file = 'publish/Fu.staticwebassets.endpoints.json'
+          boot_file = 'publish/wwwroot/_framework/blazor.boot.json'
+
+          with open(endpoints_file, 'r') as f:
+              data = json.load(f)
+
+          # Build resources from endpoints
+          resources = {"assembly": {}, "runtime": {}}
+
+          for endpoint in data.get('Endpoints', []):
+              route = endpoint.get('Route', '')
+              props = {p['Name']: p['Value'] for p in endpoint.get('EndpointProperties', [])}
+
+              if not route.startswith('_framework/'):
+                  continue
+
+              # Get integrity hash
+              integrity = props.get('integrity', '')
+
+              # Categorize resources
+              if route.endswith('.wasm'):
+                  if 'dotnet.native' in route:
+                      resources['runtime'][route.replace('_framework/', '')] = integrity
+                  else:
+                      resources['assembly'][route.replace('_framework/', '')] = integrity
+              elif route.endswith('.js') and 'dotnet' in route:
+                  resources['runtime'][route.replace('_framework/', '')] = integrity
+              elif route.endswith('.dat'):
+                  if 'icu' not in route.lower():
+                      continue
+                  resources.setdefault('icu', {})[route.replace('_framework/', '')] = integrity
+
+          # Build boot config
+          boot_config = {
+              "mainAssemblyName": "Fu",
+              "resources": resources,
+              "cacheBootResources": True,
+              "debugLevel": 0
+          }
+
+          os.makedirs(os.path.dirname(boot_file), exist_ok=True)
+          with open(boot_file, 'w') as f:
+              json.dump(boot_config, f, indent=2)
+
+          print(f"Generated {boot_file}")
+          EOF
+
       - name: Change base href
         run: sed -i 's|<base href="/" />|<base href="/fu/" />|g' publish/wwwroot/index.html
 

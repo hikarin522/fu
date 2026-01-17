@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components;
 
 using Fu.Core.Models;
 using Fu.Core.Services;
+using Fu.Services;
 
 namespace Fu.Components;
 
@@ -11,6 +12,9 @@ public partial class ShogiBoard
     [Parameter] public ShogiGameService GameService { get; set; } = null!;
     [Parameter] public EventCallback<Move> OnMoveMade { get; set; }
     [Parameter] public bool IsFlipped { get; set; }
+
+    /// <summary>候補手リスト（観戦者向け矢印表示用）</summary>
+    [Parameter] public IReadOnlyList<CandidateMove>? CandidateMoves { get; set; }
 
     private Position? SelectedPosition { get; set; }
     private List<Position> LegalMoves { get; set; } = [];
@@ -233,4 +237,43 @@ public partial class ShogiBoard
         var lastMove = this.State.MoveHistory[displayIndex - 1];
         return lastMove.To == pos || (lastMove.From is { } from && from == pos);
     }
+
+    /// <summary>候補手の矢印データを取得</summary>
+    private IEnumerable<ArrowData> GetCandidateArrows()
+    {
+        if (this.CandidateMoves is null || this.CandidateMoves.Count == 0) {
+            yield break;
+        }
+
+        var colors = new[] { "#ff4444", "#4488ff", "#44aa44" }; // 1位:赤, 2位:青, 3位:緑
+
+        foreach (var candidate in this.CandidateMoves.Take(3)) {
+            var parsed = ShogiEngineService.ParseSfenMove(candidate.Move);
+            if (parsed is not { } move) {
+                continue;
+            }
+
+            var color = colors[Math.Min(candidate.Rank - 1, colors.Length - 1)];
+            var (from, to) = move;
+
+            // 盤面の反転を考慮した座標変換
+            var (toDisplayCol, toDisplayRow) = this.IsFlipped
+                ? (8 - to.col, 8 - to.row)
+                : (to.col, to.row);
+
+            if (from is { } f) {
+                // 通常の移動
+                var (fromDisplayCol, fromDisplayRow) = this.IsFlipped
+                    ? (8 - f.col, 8 - f.row)
+                    : (f.col, f.row);
+                yield return new ArrowData(fromDisplayCol, fromDisplayRow, toDisplayCol, toDisplayRow, color, false);
+            }
+            else {
+                // 駒打ち（移動先のみ表示）
+                yield return new ArrowData(toDisplayCol, toDisplayRow, toDisplayCol, toDisplayRow, color, true);
+            }
+        }
+    }
+
+    private sealed record ArrowData(int FromCol, int FromRow, int ToCol, int ToRow, string Color, bool IsDrop);
 }

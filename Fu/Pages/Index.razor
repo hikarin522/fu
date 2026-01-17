@@ -117,7 +117,8 @@
                     State="GameService.State"
                     GameService="GameService"
                     OnMoveMade="OnMoveMade"
-                    IsFlipped="IsFlipped" />
+                    IsFlipped="IsFlipped"
+                    CandidateMoves="@(ShowCandidateArrows ? EngineService.Candidates : null)" />
 
                 <div class="player-info self">
                     <span class="player-label">
@@ -130,9 +131,17 @@
                     </span>
                 </div>
 
-                @if (IsSpectator)
+                @if (IsSpectator || IsGameEnded)
                 {
-                    <div class="spectator-notice">観戦中</div>
+                    <div class="spectator-controls">
+                        @if (IsSpectator)
+                        {
+                            <span class="spectator-notice">観戦中</span>
+                        }
+                        <button class="btn-small" @onclick="ToggleBoardFlip" title="盤面を反転">
+                            🔄 @(IsFlipped ? "後手視点" : "先手視点")
+                        </button>
+                    </div>
                 }
                 @if (ShowEvaluation)
                 {
@@ -142,7 +151,7 @@
                         ShowEvaluationValue="ShowEvaluationValue"
                         ShowHasMate="ShowHasMate"
                         ShowMateCount="ShowMateCount"
-                        ShowCandidates="IsSpectator" />
+                        ShowCandidates="ShowCandidateArrows" />
                 }
 
                 <div class="game-controls">
