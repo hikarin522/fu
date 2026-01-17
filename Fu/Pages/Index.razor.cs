@@ -151,8 +151,18 @@ public partial class Index : IAsyncDisposable
 
     private void OpenNewGameDialog()
     {
-        this.SelectedSentePeerId = "";
-        this.SelectedGotePeerId = "";
+        // 参加者が2人の場合、デフォルトで先手・後手を割り当て
+        var participants = this.WebRtcService.Participants.ToList();
+        if (participants.Count >= 2) {
+            // 自分を先手、相手を後手にデフォルト設定
+            var me = participants.FirstOrDefault(p => p.PeerId == this.WebRtcService.MyPeerId);
+            var opponent = participants.FirstOrDefault(p => p.PeerId != this.WebRtcService.MyPeerId);
+            this.SelectedSentePeerId = me?.PeerId ?? participants[0].PeerId;
+            this.SelectedGotePeerId = opponent?.PeerId ?? participants[1].PeerId;
+        } else {
+            this.SelectedSentePeerId = "";
+            this.SelectedGotePeerId = "";
+        }
         this.OptShowAdvantage = false;
         this.OptShowEvaluationValue = false;
         this.OptShowHasMate = false;
