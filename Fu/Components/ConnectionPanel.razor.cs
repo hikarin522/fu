@@ -26,6 +26,7 @@ public partial class ConnectionPanel : IDisposable
     private bool IsProcessing { get; set; }
     private bool HasNotifiedConnected { get; set; }
     private bool IsJoiningRoom { get; set; }
+    private string? SavedPeerId { get; set; }
 
     private string RoomUrl => string.IsNullOrEmpty(this.RoomId) ? "" : $"{this.BaseUrl}{this.RoomId}";
     private bool HasInitialRoomId => !string.IsNullOrEmpty(this.InitialRoomId);
@@ -65,6 +66,7 @@ public partial class ConnectionPanel : IDisposable
                 this.InputRoomId = session!.RoomId;
                 this.Nickname = session.Nickname;
                 this.InputNickname = session.Nickname;
+                this.SavedPeerId = session.PeerId; // 保存されたPeerIDを再利用
                 this.StateHasChanged();
                 await this.JoinRoom();
             }
@@ -74,7 +76,7 @@ public partial class ConnectionPanel : IDisposable
         }
     }
 
-    private sealed record GameSessionData(string RoomId, string Nickname, long Timestamp);
+    private sealed record GameSessionData(string RoomId, string Nickname, string? PeerId, long Timestamp);
 
     private async Task OnStateChangedAsync(ConnectionState state)
     {
@@ -129,8 +131,9 @@ public partial class ConnectionPanel : IDisposable
             throw new InvalidOperationException("ルームIDを入力してください");
         }
         var roomId = this.InputRoomId.Trim().ToUpperInvariant();
-        await this.WebRtcService.JoinRoomAsync(new RoomId(roomId), this.Nickname);
+        await this.WebRtcService.JoinRoomAsync(new RoomId(roomId), this.Nickname, this.SavedPeerId);
         this.UpdateUrlWithRoomId(roomId);
+        this.SavedPeerId = null; // 使用後はクリア
     });
 
     private async Task ExecuteWithProcessing(Func<Task> action)

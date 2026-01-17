@@ -26,12 +26,17 @@ window.WebRtc = {
     },
 
     // ルームを作成（ホスト）
-    createRoom: async function (nickname) {
+    createRoom: async function (nickname, savedPeerId = null) {
         myNickname = nickname;
         isHost = true;
         currentRoomId = generateRoomId();
-        // 自分のIDはニックネームベースで生成（一意性のためにランダム文字列を付加）
-        pendingSelfId = generateDotNetId(nickname);
+        // 保存されたPeerIDがあれば再利用、なければ新規生成
+        if (savedPeerId) {
+            pendingSelfId = savedPeerId;
+            console.log('Reusing saved peer ID:', savedPeerId);
+        } else {
+            pendingSelfId = generateDotNetId(nickname);
+        }
         myPeerId = pendingSelfId;
 
         if (dotNetRef) {
@@ -45,12 +50,17 @@ window.WebRtc = {
     },
 
     // ルームに参加（非ホスト）
-    joinRoom: async function (roomId, nickname) {
+    joinRoom: async function (roomId, nickname, savedPeerId = null) {
         myNickname = nickname;
         isHost = false;
         currentRoomId = roomId;
-        // 自分のIDはニックネームベースで生成
-        pendingSelfId = generateDotNetId(nickname);
+        // 保存されたPeerIDがあれば再利用、なければ新規生成
+        if (savedPeerId) {
+            pendingSelfId = savedPeerId;
+            console.log('Reusing saved peer ID:', savedPeerId);
+        } else {
+            pendingSelfId = generateDotNetId(nickname);
+        }
         myPeerId = pendingSelfId;
 
         if (dotNetRef) {
@@ -311,11 +321,12 @@ const SOUND_SETTINGS_KEY = 'fu_sound_enabled';
 const GAME_SESSION_KEY = 'fu_game_session';
 
 window.GameSession = {
-    save: function (roomId, nickname) {
+    save: function (roomId, nickname, peerId) {
         try {
             const session = {
                 roomId: roomId,
                 nickname: nickname,
+                peerId: peerId,
                 timestamp: Date.now()
             };
             localStorage.setItem(GAME_SESSION_KEY, JSON.stringify(session));

@@ -61,23 +61,23 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     }
 
     /// <summary>ルームを作成（ホスト用）- 6文字のルームIDを返す</summary>
-    public async Task<RoomId> CreateRoomAsync(string nickname)
+    public async Task<RoomId> CreateRoomAsync(string nickname, string? savedPeerId = null)
     {
         this.IsHost = true;
         this.MyNickname = nickname;
-        var roomId = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom", nickname);
+        var roomId = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom", nickname, savedPeerId);
         this.RoomId = new RoomId(roomId);
         this.MyPeerId = await jsRuntime.InvokeAsync<string>("WebRtc.getMyPeerId");
         return this.RoomId.Value;
     }
 
     /// <summary>ルームに参加</summary>
-    public async Task JoinRoomAsync(RoomId roomId, string nickname)
+    public async Task JoinRoomAsync(RoomId roomId, string nickname, string? savedPeerId = null)
     {
         this.IsHost = false;
         this.MyNickname = nickname;
         this.RoomId = roomId;
-        await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId.AsPrimitive(), nickname);
+        await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId.AsPrimitive(), nickname, savedPeerId);
         this.MyPeerId = await jsRuntime.InvokeAsync<string>("WebRtc.getMyPeerId");
     }
 

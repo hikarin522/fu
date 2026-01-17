@@ -233,25 +233,22 @@ public partial class Index : IAsyncDisposable
     {
         try {
             var nickname = await this.JS.InvokeAsync<string>("NicknameStorage.load");
-            await this.JS.InvokeVoidAsync("GameSession.save", this.WebRtcService.RoomId?.AsPrimitive(), nickname);
+            await this.JS.InvokeVoidAsync("GameSession.save", this.WebRtcService.RoomId?.AsPrimitive(), nickname, this.WebRtcService.MyPeerId);
         }
         catch {
             // 保存失敗は無視
         }
     }
 
-    private async Task<(string? roomId, string? nickname)> LoadGameSessionAsync()
+    private async Task<GameSessionData?> LoadGameSessionAsync()
     {
         try {
-            var session = await this.JS.InvokeAsync<GameSessionData?>("GameSession.load");
-            if (session is not null) {
-                return (session.RoomId, session.Nickname);
-            }
+            return await this.JS.InvokeAsync<GameSessionData?>("GameSession.load");
         }
         catch {
             // 読み込み失敗は無視
+            return null;
         }
-        return (null, null);
     }
 
     private async Task ClearGameSessionAsync()
@@ -264,7 +261,7 @@ public partial class Index : IAsyncDisposable
         }
     }
 
-    private sealed record GameSessionData(string RoomId, string Nickname, long Timestamp);
+    private sealed record GameSessionData(string RoomId, string Nickname, string? PeerId, long Timestamp);
 
     private async ValueTask OnGameStateChangedAsync()
     {
