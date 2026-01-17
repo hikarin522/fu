@@ -29,5 +29,9 @@ x86/
 .DS_Store
 Thumbs.db
 
+## libman/external libraries
+Fu/wwwroot/lib/
+Fu/wwwroot/coi-serviceworker.min.js
+
 ## Claude Code
 .claude/settings.local.json

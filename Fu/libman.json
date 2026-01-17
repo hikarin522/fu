@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "defaultProvider": "jsdelivr",
+  "libraries": [
+    {
+      "library": "peerjs@1.5.4",
+      "destination": "wwwroot/lib/peerjs/",
+      "files": [
+        "dist/peerjs.min.js"
+      ]
+    }
+  ]
+}

@@ -11,9 +11,9 @@ async function initShogiEngine() {
     }
 
     try {
-        // Load YaneuraOu from CDN
+        // Load YaneuraOu from local lib
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/yaneuraou.wasm@0.1.2/yaneuraou.js';
+        script.src = 'lib/yaneuraou/yaneuraou.js';
         document.head.appendChild(script);
 
         await new Promise((resolve, reject) => {

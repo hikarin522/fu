@@ -1046,10 +1046,6 @@ a, .btn-link {
     font-size: 12px;
 }
 
-.evaluation-unavailable small {
-    font-size: 10px;
-}
-
 /* ゲームコントロール */
 .game-controls {
     display: flex;
