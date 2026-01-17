@@ -1300,7 +1300,7 @@ a, .btn-link {
     color: white;
 }
 
-/* 棋譜ツリービュー（Git風） */
+/* 棋譜ツリービュー */
 .move-tree-view {
     font-family: monospace;
     font-size: 12px;
@@ -1313,70 +1313,35 @@ a, .btn-link {
     overflow-y: auto;
 }
 
-/* Git風ツリー */
-.git-tree {
-    display: flex;
-    flex-direction: column;
-}
-
-.git-tree-row {
-    display: flex;
-    align-items: center;
-    min-height: 28px;
-}
-
-.git-graph {
-    flex-shrink: 0;
-    min-width: 20px;
-}
-
-.git-graph-svg {
-    display: block;
-    overflow: visible;
-}
-
-.git-tree-content {
-    flex: 1;
+/* ブランチ（インデントで分岐を表現） */
+.tree-branch {
+    border-left: 2px solid #4ec9b0;
     padding-left: 8px;
+    margin-bottom: 4px;
 }
 
-/* SVGライン - 色分け */
-.git-line {
-    stroke-width: 2;
+.tree-branch:first-child {
+    border-left-color: #4ec9b0;
 }
 
-.git-line.col-0 { stroke: #4ec9b0; }
-.git-line.col-1 { stroke: #ce9178; }
-.git-line.col-2 { stroke: #dcdcaa; }
-.git-line.col-3 { stroke: #c586c0; }
-.git-line.col-4 { stroke: #9cdcfe; }
-.git-line.col-5 { stroke: #d16969; }
-
-/* ノードの丸 */
-.git-node {
-    stroke-width: 2;
+.tree-branch:nth-child(2) {
+    border-left-color: #ce9178;
 }
 
-.git-node.col-0 { fill: #1e1e1e; stroke: #4ec9b0; }
-.git-node.col-1 { fill: #1e1e1e; stroke: #ce9178; }
-.git-node.col-2 { fill: #1e1e1e; stroke: #dcdcaa; }
-.git-node.col-3 { fill: #1e1e1e; stroke: #c586c0; }
-.git-node.col-4 { fill: #1e1e1e; stroke: #9cdcfe; }
-.git-node.col-5 { fill: #1e1e1e; stroke: #d16969; }
-
-.git-node.current {
-    fill: #0078d4 !important;
-    stroke: #0078d4 !important;
+.tree-branch:nth-child(3) {
+    border-left-color: #dcdcaa;
 }
 
-.git-node.start {
-    fill: #2e7d32 !important;
-    stroke: #4caf50 !important;
+.tree-branch:nth-child(4) {
+    border-left-color: #c586c0;
 }
 
-.git-node.start.current {
-    fill: #4caf50 !important;
-    stroke: #81c784 !important;
+.tree-branch:nth-child(5) {
+    border-left-color: #9cdcfe;
+}
+
+.tree-branch:nth-child(n+6) {
+    border-left-color: #d16969;
 }
 
 /* 手のテキスト */
@@ -1385,7 +1350,6 @@ a, .btn-link {
     border-radius: 3px;
     cursor: pointer;
     background: transparent;
-    border: none;
     white-space: nowrap;
     transition: all 0.15s;
     color: #d4d4d4;
@@ -1400,21 +1364,16 @@ a, .btn-link {
     background: #0078d4;
     color: white;
     font-weight: bold;
-    border-radius: 3px;
 }
 
-.tree-node.start {
-    color: #4ec9b0;
-    font-weight: bold;
-}
-
-.tree-node.start.current {
-    background: #2e7d32;
-    color: white;
-}
-
-.tree-node.branch {
+.tree-node.branch-start {
     color: #ce9178;
+    font-style: italic;
+}
+
+.tree-node.branch-start::before {
+    content: "↳ ";
+    color: #888;
 }
 
 /* 検討モード */

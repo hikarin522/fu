@@ -3,79 +3,27 @@
 <div class="move-tree-view">
     @if (MoveTree is not null)
     {
-        var allLines = BuildAllLines();
-        <div class="git-tree">
-            @foreach (var (line, lineIndex) in allLines.Select((l, i) => (l, i)))
-            {
-                <div class="git-tree-row">
-                    @* グラフ部分 *@
-                    <div class="git-graph">
-                        <svg width="@(line.MaxColumn * ColumnWidth + ColumnWidth)" height="@RowHeight" class="git-graph-svg">
-                            @* 縦線（継続線） *@
-                            @foreach (var col in line.ContinuingColumns)
-                            {
-                                <line x1="@(col * ColumnWidth + ColumnWidth / 2)"
-                                      y1="0"
-                                      x2="@(col * ColumnWidth + ColumnWidth / 2)"
-                                      y2="@RowHeight"
-                                      class="git-line col-@(col % 6)" />
-                            }
-
-                            @* 分岐線（親から分岐する場合） *@
-                            @if (line.IsBranch && line.ParentColumn >= 0)
-                            {
-                                <path d="M @(line.ParentColumn * ColumnWidth + ColumnWidth / 2) 0
-                                         L @(line.ParentColumn * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2)
-                                         Q @(line.ParentColumn * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2 + 4)
-                                           @(line.ParentColumn * ColumnWidth + ColumnWidth / 2 + 4) @(RowHeight / 2 + 4)
-                                         L @(line.Column * ColumnWidth + ColumnWidth / 2 - 4) @(RowHeight / 2 + 4)
-                                         Q @(line.Column * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2 + 4)
-                                           @(line.Column * ColumnWidth + ColumnWidth / 2) @(RowHeight / 2 + 8)
-                                         L @(line.Column * ColumnWidth + ColumnWidth / 2) @RowHeight"
-                                      fill="none"
-                                      class="git-line col-@(line.Column % 6)" />
-                            }
-                            else if (line.Node is not null || line.IsStart)
-                            {
-                                @* 通常の縦線 *@
-                                <line x1="@(line.Column * ColumnWidth + ColumnWidth / 2)"
-                                      y1="0"
-                                      x2="@(line.Column * ColumnWidth + ColumnWidth / 2)"
-                                      y2="@RowHeight"
-                                      class="git-line col-@(line.Column % 6)" />
-                            }
-
-                            @* ノードの丸 *@
-                            @if (line.Node is not null || line.IsStart)
-                            {
-                                <circle cx="@(line.Column * ColumnWidth + ColumnWidth / 2)"
-                                        cy="@(RowHeight / 2)"
-                                        r="5"
-                                        class="git-node col-@(line.Column % 6) @(IsCurrentNode(line.Node) ? "current" : "") @(line.IsStart ? "start" : "")" />
-                            }
-                        </svg>
-                    </div>
-
-                    @* 手の表示 *@
-                    <div class="git-tree-content">
-                        @if (line.IsStart)
+        var branches = BuildBranches();
+        @foreach (var branch in branches)
+        {
+            <div class="tree-branch" style="margin-left: @(branch.IndentLevel * IndentWidth)px">
+                @foreach (var nodeInfo in branch.Nodes)
+                {
+                    <div class="tree-node @(IsCurrentNode(nodeInfo.Node) ? "current" : "") @(nodeInfo.IsBranchStart ? "branch-start" : "")"
+                         @onclick="() => OnNodeClick(nodeInfo.Node)"
+                         title="@(nodeInfo.Node?.Move.ToNotationWithFrom() ?? "")">
+                        @if (nodeInfo.IsStart)
                         {
-                            <span class="tree-node start @(DisplayMoveIndex == 0 ? "current" : "")"
-                                  @onclick="() => OnNodeClick(null)">開始局面</span>
+                            <span>開始局面</span>
                         }
-                        else if (line.Node is not null)
+                        else if (nodeInfo.Node is not null)
                         {
-                            var isCurrent = IsCurrentNode(line.Node);
-                            <span class="tree-node @(isCurrent ? "current" : "") @(line.IsBranch ? "branch" : "")"
-                                  @onclick="() => OnNodeClick(line.Node)"
-                                  title="@line.Node.Move.ToNotationWithFrom()">
-                                @(line.Node.Depth). @line.Node.Move.ToNotationWithFrom()
-                            </span>
+                            <span>@(nodeInfo.Node.Depth). @nodeInfo.Node.Move.ToNotationWithFrom()</span>
                         }
                     </div>
-                </div>
-            }
-        </div>
+                }
+            </div>
+        }
     }
 </div>
 
@@ -85,177 +33,94 @@
     [Parameter] public int DisplayMoveIndex { get; set; }
     [Parameter] public EventCallback<MoveNode?> OnNodeSelected { get; set; }
 
-    private const int ColumnWidth = 20;
-    private const int RowHeight = 28;
+    private const int IndentWidth = 16;
 
     private async Task OnNodeClick(MoveNode? node)
     {
         await OnNodeSelected.InvokeAsync(node);
     }
 
-    /// <summary>ノードが現在表示中の位置かどうかを判定</summary>
     private bool IsCurrentNode(MoveNode? node)
     {
-        if (node is null || MoveHistory is null || node.Depth > DisplayMoveIndex) {
+        if (node is null)
+        {
+            return DisplayMoveIndex == 0;
+        }
+
+        if (MoveHistory is null || node.Depth > DisplayMoveIndex)
+        {
             return false;
         }
 
-        if (node.Depth != DisplayMoveIndex) {
+        if (node.Depth != DisplayMoveIndex)
+        {
             return false;
         }
 
         var nodePath = node.GetMoves();
-        for (int i = 0; i < nodePath.Count && i < MoveHistory.Count; i++) {
-            if (!MoveNode.IsSameMove(nodePath[i], MoveHistory[i])) {
+        for (int i = 0; i < nodePath.Count && i < MoveHistory.Count; i++)
+        {
+            if (!MoveNode.IsSameMove(nodePath[i], MoveHistory[i]))
+            {
                 return false;
             }
         }
         return true;
     }
 
-    private record TreeLine(
-        MoveNode? Node,
-        int Column,
-        int MaxColumn,
-        bool IsBranch,
-        int ParentColumn,
-        bool IsStart,
-        HashSet<int> ContinuingColumns
-    );
+    private record NodeInfo(MoveNode? Node, bool IsStart, bool IsBranchStart);
+    private record Branch(int IndentLevel, List<NodeInfo> Nodes);
 
-    private record NodeInfo(MoveNode? Node, int Column, bool IsBranch, int ParentColumn, bool IsStart, int? EndDepth);
-
-    private List<TreeLine> BuildAllLines()
+    private List<Branch> BuildBranches()
     {
         if (MoveTree is null) return [];
 
-        var lines = new List<TreeLine>();
+        var branches = new List<Branch>();
 
-        // 各深さごとにノードを収集（とそのカラム情報）
-        var nodesByDepth = new Dictionary<int, List<NodeInfo>>();
-        var nodeColumns = new Dictionary<MoveNode, int>();
-        var nodeEndDepths = new Dictionary<MoveNode, int>(); // ノードのブランチが終わる深さ
+        // メインブランチ（開始局面 + メインライン）
+        var mainNodes = new List<NodeInfo> { new(null, true, false) };
+        CollectMainLine(MoveTree.RootChildren, mainNodes);
+        branches.Add(new Branch(0, mainNodes));
 
-        // 開始ノード（深さ0）
-        var startEndDepth = MoveTree.RootChildren.Count > 0
-            ? GetMaxDepthInBranch(MoveTree.RootChildren[0])
-            : 0;
-        nodesByDepth[0] = [new NodeInfo(null, 0, false, -1, true, startEndDepth)];
+        // サブブランチを収集
+        CollectSubBranches(MoveTree.RootChildren, 1, branches);
 
-        // カラム割り当て（深さ優先で走査）
-        AssignColumnsToNodes(MoveTree.RootChildren, 0, -1, nodesByDepth, nodeColumns, nodeEndDepths, new HashSet<int> { 0 });
-
-        // 深さ順に行を生成
-        var maxDepth = nodesByDepth.Keys.DefaultIfEmpty(0).Max();
-
-        for (int depth = 0; depth <= maxDepth; depth++)
-        {
-            if (!nodesByDepth.TryGetValue(depth, out var nodesAtDepth)) continue;
-
-            foreach (var nodeInfo in nodesAtDepth)
-            {
-                // この深さでアクティブなカラムを計算
-                var activeColumns = new HashSet<int>();
-                foreach (var kvp in nodesByDepth)
-                {
-                    foreach (var ni in kvp.Value)
-                    {
-                        // このノードが開始した深さからEndDepthまでの間、カラムがアクティブ
-                        var nodeDepth = ni.Node?.Depth ?? 0;
-                        var endDepth = ni.EndDepth ?? nodeDepth;
-                        if (nodeDepth <= depth && depth <= endDepth)
-                        {
-                            activeColumns.Add(ni.Column);
-                        }
-                    }
-                }
-
-                var maxCol = activeColumns.Count > 0 ? activeColumns.Max() : 0;
-                lines.Add(new TreeLine(
-                    nodeInfo.Node,
-                    nodeInfo.Column,
-                    maxCol,
-                    nodeInfo.IsBranch,
-                    nodeInfo.ParentColumn,
-                    nodeInfo.IsStart,
-                    activeColumns
-                ));
-            }
-        }
-
-        return lines;
+        return branches;
     }
 
-    private void AssignColumnsToNodes(
-        IReadOnlyList<MoveNode> nodes,
-        int parentColumn,
-        int grandParentColumn,
-        Dictionary<int, List<NodeInfo>> nodesByDepth,
-        Dictionary<MoveNode, int> nodeColumns,
-        Dictionary<MoveNode, int> nodeEndDepths,
-        HashSet<int> usedColumns)
+    private void CollectMainLine(IReadOnlyList<MoveNode> nodes, List<NodeInfo> result)
+    {
+        if (nodes.Count == 0) return;
+
+        // 最初の子がメインライン
+        var mainNode = nodes[0];
+        result.Add(new NodeInfo(mainNode, false, false));
+
+        // 再帰的にメインラインを辿る
+        CollectMainLine(mainNode.Children, result);
+    }
+
+    private void CollectSubBranches(IReadOnlyList<MoveNode> nodes, int indentLevel, List<Branch> branches)
     {
         for (int i = 0; i < nodes.Count; i++)
         {
             var node = nodes[i];
-            var isBranch = i > 0;
-            var column = isBranch ? GetNextAvailableColumn(usedColumns) : parentColumn;
 
-            if (isBranch)
+            if (i > 0)
             {
-                usedColumns.Add(column);
-            }
+                // 2番目以降は分岐
+                var branchNodes = new List<NodeInfo> { new(node, false, true) };
+                CollectMainLine(node.Children, branchNodes);
+                branches.Add(new Branch(indentLevel, branchNodes));
 
-            nodeColumns[node] = column;
-
-            // このノードのブランチの終端深さを計算
-            var endDepth = GetMaxDepthInBranch(node);
-            nodeEndDepths[node] = endDepth;
-
-            var depth = node.Depth;
-            if (!nodesByDepth.ContainsKey(depth))
-            {
-                nodesByDepth[depth] = [];
-            }
-            nodesByDepth[depth].Add(new NodeInfo(
-                node,
-                column,
-                isBranch,
-                isBranch ? parentColumn : grandParentColumn,
-                false,
-                endDepth
-            ));
-
-            // 子ノードを処理
-            if (node.Children.Count > 0)
-            {
-                AssignColumnsToNodes(node.Children, column, column, nodesByDepth, nodeColumns, nodeEndDepths, usedColumns);
+                // この分岐内のさらなるサブブランチを収集
+                CollectSubBranches(node.Children, indentLevel + 1, branches);
             }
             else
             {
-                // 終端ノードの場合、このカラムを解放（再利用可能に）
-                usedColumns.Remove(column);
+                // メインラインの子ノードからのサブブランチ
+                CollectSubBranches(node.Children, indentLevel, branches);
             }
         }
-    }
-
-    private static int GetMaxDepthInBranch(MoveNode node)
-    {
-        if (node.Children.Count == 0)
-        {
-            return node.Depth;
-        }
-        // メインライン（最初の子）の終端深さを返す
-        return GetMaxDepthInBranch(node.Children[0]);
-    }
-
-    private static int GetNextAvailableColumn(HashSet<int> usedColumns)
-    {
-        int col = 0;
-        while (usedColumns.Contains(col))
-        {
-            col++;
-        }
-        return col;
     }
 }
