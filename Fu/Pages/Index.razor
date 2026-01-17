@@ -149,6 +149,16 @@
                         </button>
                     </div>
                 }
+                @if (Spectators.Any())
+                {
+                    <div class="spectator-list">
+                        <span class="spectator-list-label">観戦者:</span>
+                        @foreach (var spectator in Spectators)
+                        {
+                            <span class="spectator-name">@spectator.Nickname</span>
+                        }
+                    </div>
+                }
                 @if (ShowEvaluation)
                 {
                     <EvaluationBar

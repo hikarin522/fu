@@ -898,6 +898,32 @@ a, .btn-link {
     font-weight: bold;
 }
 
+/* 観戦者リスト */
+.spectator-list {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.spectator-list-label {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.spectator-name {
+    background: #e3f2fd;
+    color: #1565c0;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
 /* 評価値バー */
 .evaluation-container {
     display: flex;

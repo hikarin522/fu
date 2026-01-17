@@ -57,6 +57,10 @@ public partial class Index : IAsyncDisposable
     private bool IsSpectator => !this.IsPlayer && this.GameService.State.Status == GameStatus.Playing;
     private bool IsGameEnded => this.GameService.State.Status.IsGameOver();
 
+    // 観戦者リスト（対局者以外の参加者）
+    private IEnumerable<Participant> Spectators => this.WebRtcService.Participants
+        .Where(p => p.PeerId != this.SentePeerId && p.PeerId != this.GotePeerId);
+
     // 評価値表示（観戦者・対局終了後は常に全表示）
     private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded;
     private bool ShowAdvantage => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
@@ -118,14 +122,11 @@ public partial class Index : IAsyncDisposable
     private async Task OnDataChannelReadyAsync()
     {
         await this.InvokeAsync(async () => {
-            if (this.WebRtcService.IsHost) {
-                // ホストの場合は対局ダイアログを表示
-                this.OpenNewGameDialog();
-            }
-            else {
+            if (!this.WebRtcService.IsHost) {
                 // 非ホストの場合は現在のゲーム状態をリクエスト
                 await this.WebRtcService.SendGameStateRequestAsync();
             }
+            // ホストの場合は空の盤面を表示（「新規対局」ボタンから対局設定を開く）
             this.StateHasChanged();
         });
     }
