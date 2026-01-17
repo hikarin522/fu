@@ -62,9 +62,9 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     {
         this.IsHost = true;
         this.MyNickname = nickname;
-        var id = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom", nickname);
-        this.MyPeerId = id;
-        this.RoomId = new RoomId(id);
+        var roomId = await jsRuntime.InvokeAsync<string>("WebRtc.createRoom", nickname);
+        this.RoomId = new RoomId(roomId);
+        this.MyPeerId = await jsRuntime.InvokeAsync<string>("WebRtc.getMyPeerId");
         return this.RoomId.Value;
     }
 
