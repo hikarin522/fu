@@ -98,11 +98,6 @@ public partial class Index : IAsyncDisposable
         }
     }
 
-    private async Task OnConnected()
-    {
-        await this.InvokeAsync(this.StateHasChanged);
-    }
-
     private async Task OnDataChannelReadyAsync()
     {
         await this.InvokeAsync(async () => {

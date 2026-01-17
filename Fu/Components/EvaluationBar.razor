@@ -113,10 +113,11 @@
         null => "---",
         > 29000 => "先手勝ち",
         < -29000 => "後手勝ち",
-        var e => FormatPawnValue(e, "F1")
+        { } e => FormatPawnValue(e, "F1")
     };
 
-    private static string FormatPawnValue(int centipawn, string format) {
+    private static string FormatPawnValue(int centipawn, string format)
+    {
         var v = centipawn / 100.0;
         return v >= 0 ? $"+{v.ToString(format)}" : v.ToString(format);
     }
@@ -136,7 +137,7 @@
             null => "---",
             > 29000 => "勝ち",
             < -29000 => "負け",
-            var e => FormatPawnValue(e, "F0")
+            { } e => FormatPawnValue(e, "F0")
         }
     };
 

@@ -183,70 +183,72 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 
             switch (type) {
                 case "move":
-                    var moveMessage = JsonSerializer.Deserialize<MoveMessage>(message, JsonConfig.Options);
-                    if (moveMessage is { } msg) {
-                        var move = Move.FromDto(msg.Move);
-                        if (OnMoveReceived is { } moveHandler) {
-                            await moveHandler(move);
-                        }
-                    }
+                    await this.HandleMoveMessageAsync(message);
                     break;
-
                 case "gameStart":
-                    if (OnGameStart is { } startHandler) {
-                        await startHandler();
+                    if (OnGameStart is { } h) {
+                        await h();
                     }
                     break;
-
                 case "gameStartWithPlayers":
-                    var gsMessage = JsonSerializer.Deserialize<GameStartWithPlayersMessage>(message, JsonConfig.Options);
-                    if (gsMessage is not null && OnGameStartWithPlayers is { } gsHandler) {
-                        var senteNickname = this._participants.GetValueOrDefault(gsMessage.SentePeerId)?.Nickname ?? "先手";
-                        var goteNickname = this._participants.GetValueOrDefault(gsMessage.GotePeerId)?.Nickname ?? "後手";
-                        await gsHandler(new GameStartInfo(gsMessage.SentePeerId, gsMessage.GotePeerId, senteNickname, goteNickname, gsMessage.EvaluationOptions));
-                    }
+                    await this.HandleGameStartWithPlayersAsync(message);
                     break;
-
                 case "resign":
-                    if (OnResignReceived is { } resignHandler) {
-                        await resignHandler();
+                    if (OnResignReceived is { } h2) {
+                        await h2();
                     }
                     break;
-
                 case "gameStateRequest":
-                    if (OnGameStateRequested is { } requestHandler) {
-                        await requestHandler();
+                    if (OnGameStateRequested is { } h3) {
+                        await h3();
                     }
                     break;
-
                 case "gameStateSync":
-                    var syncMessage = JsonSerializer.Deserialize<GameStateSyncMessage>(message, JsonConfig.Options);
-                    if (syncMessage is not null && OnGameStateSyncReceived is { } syncHandler) {
-                        var moves = syncMessage.MoveHistory.Select(Move.FromDto).ToList();
-                        var status = Enum.TryParse<GameStatus>(syncMessage.Status, out var s) ? s : GameStatus.WaitingForConnection;
-                        await syncHandler(new GameStateSyncInfo(
-                            moves,
-                            syncMessage.SentePeerId,
-                            syncMessage.GotePeerId,
-                            syncMessage.SenteNickname,
-                            syncMessage.GoteNickname,
-                            status,
-                            syncMessage.EvaluationOptions
-                        ));
-                    }
+                    await this.HandleGameStateSyncAsync(message);
                     break;
-
                 case "branchResume":
-                    var branchMessage = JsonSerializer.Deserialize<BranchResumeMessage>(message, JsonConfig.Options);
-                    if (branchMessage is not null && OnBranchResumeReceived is { } branchHandler) {
-                        var branchMoves = branchMessage.MoveHistory.Select(Move.FromDto).ToList();
-                        await branchHandler(branchMoves);
-                    }
+                    await this.HandleBranchResumeAsync(message);
                     break;
             }
         }
         catch (JsonException) {
             // Ignore JSON parse errors from malformed messages
+        }
+    }
+
+    private async Task HandleMoveMessageAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<MoveMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnMoveReceived is { } handler) {
+            await handler(Move.FromDto(msg.Move));
+        }
+    }
+
+    private async Task HandleGameStartWithPlayersAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<GameStartWithPlayersMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnGameStartWithPlayers is { } handler) {
+            var senteNickname = this._participants.GetValueOrDefault(msg.SentePeerId)?.Nickname ?? "先手";
+            var goteNickname = this._participants.GetValueOrDefault(msg.GotePeerId)?.Nickname ?? "後手";
+            await handler(new GameStartInfo(msg.SentePeerId, msg.GotePeerId, senteNickname, goteNickname, msg.EvaluationOptions));
+        }
+    }
+
+    private async Task HandleGameStateSyncAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<GameStateSyncMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnGameStateSyncReceived is { } handler) {
+            var moves = msg.MoveHistory.Select(Move.FromDto).ToList();
+            var status = Enum.TryParse<GameStatus>(msg.Status, out var s) ? s : GameStatus.WaitingForConnection;
+            await handler(new GameStateSyncInfo(moves, msg.SentePeerId, msg.GotePeerId, msg.SenteNickname, msg.GoteNickname, status, msg.EvaluationOptions));
+        }
+    }
+
+    private async Task HandleBranchResumeAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<BranchResumeMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnBranchResumeReceived is { } handler) {
+            await handler(msg.MoveHistory.Select(Move.FromDto).ToList());
         }
     }
 

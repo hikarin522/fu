@@ -115,7 +115,9 @@ public partial class ShogiBoard
 
     private static bool CanPromoteOnDisplayBoard(Position from, Position to, Piece piece)
     {
-        if (!piece.Type.CanPromote() || piece.Type.IsPromoted()) return false;
+        if (!piece.Type.CanPromote() || piece.Type.IsPromoted()) {
+            return false;
+        }
         const int sentePromotionBoundary = 2, gotePromotionBoundary = 6;
         return piece.Owner == Player.Sente
             ? from.Row <= sentePromotionBoundary || to.Row <= sentePromotionBoundary
@@ -235,13 +237,17 @@ public partial class ShogiBoard
     /// <summary>候補手の矢印データを取得</summary>
     private IEnumerable<ArrowData> GetCandidateArrows()
     {
-        if (this.CandidateMoves is not { Count: > 0 }) yield break;
+        if (this.CandidateMoves is not { Count: > 0 }) {
+            yield break;
+        }
 
         // 太さで順位を表現: 1位=10, 2位=6, 3位=3
         var strokeWidths = new[] { 10, 6, 3 };
 
         foreach (var candidate in this.CandidateMoves.Take(3)) {
-            if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) continue;
+            if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) {
+                continue;
+            }
             var (from, to) = move;
 
             var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];

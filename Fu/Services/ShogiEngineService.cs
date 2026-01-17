@@ -154,12 +154,16 @@ public class ShogiEngineService : IAsyncDisposable
 
         // メインの評価値を更新（multipv=1または指定なしの場合）
         if (info.MultiPv is null or 1) {
-            if (info.Depth.HasValue) this.Depth = info.Depth.Value;
+            if (info.Depth.HasValue) {
+                this.Depth = info.Depth.Value;
+            }
             if (info.Score.HasValue) {
                 this.Evaluation = info.Score.Value;
                 this.MateIn = info.MateIn;
             }
-            if (info.Pv is not null) this.PrincipalVariation = info.Pv;
+            if (info.Pv is not null) {
+                this.PrincipalVariation = info.Pv;
+            }
         }
 
         // 候補手リストを更新
@@ -199,7 +203,9 @@ public class ShogiEngineService : IAsyncDisposable
                 case "pv" when i + 1 < parts.Length:
                     var pvParts = parts.Skip(i + 1).ToArray();
                     pv = string.Join(" ", pvParts);
-                    if (pvParts.Length > 0) move = pvParts[0];
+                    if (pvParts.Length > 0) {
+                        move = pvParts[0];
+                    }
                     break;
             }
         }
@@ -256,7 +262,9 @@ public class ShogiEngineService : IAsyncDisposable
             PieceType.Gold => "G", PieceType.Silver => "S", PieceType.Knight => "N",
             PieceType.Lance => "L", PieceType.Pawn => "P", _ => ""
         };
-        if (piece.Type.IsPromoted()) c = "+" + c;
+        if (piece.Type.IsPromoted()) {
+            c = "+" + c;
+        }
         return piece.Owner == Player.Sente ? c : c.ToLowerInvariant();
     }
 
