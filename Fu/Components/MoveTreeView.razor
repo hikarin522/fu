@@ -11,12 +11,12 @@
             }
 
             <div class="main-line">
-                <span class="tree-node start @(CurrentDepth == 0 ? "current" : "")"
+                <span class="tree-node start @(DisplayMoveIndex == 0 ? "current" : "")"
                       @onclick="() => OnNodeClick(null)">開始</span>
 
                 @foreach (var (node, index) in mainLine.Select((n, i) => (n, i)))
                 {
-                    var isCurrent = CurrentNode == node;
+                    var isCurrent = IsCurrentNode(node);
                     var hasBranch = node.Parent?.Children.Count > 1 || (node.Parent is null && MoveTree.RootChildren.Count > 1);
                     var branchCount = node.Parent?.Children.Count ?? MoveTree.RootChildren.Count;
 
@@ -53,7 +53,7 @@
                         }
                         @foreach (var (node, nodeIdx) in branchNodes.Select((n, i) => (n, i)))
                         {
-                            var isCurrent = CurrentNode == node;
+                            var isCurrent = IsCurrentNode(node);
                             <span class="tree-node branch @(isCurrent ? "current" : "")"
                                   @onclick="() => OnNodeClick(node)"
                                   title="@node.Move.ToNotationWithFrom()">
@@ -73,13 +73,35 @@
 
 @code {
     [Parameter] public MoveTree? MoveTree { get; set; }
-    [Parameter] public MoveNode? CurrentNode { get; set; }
-    [Parameter] public int CurrentDepth { get; set; }
+    [Parameter] public IReadOnlyList<Move>? MoveHistory { get; set; }
+    [Parameter] public int DisplayMoveIndex { get; set; }
     [Parameter] public EventCallback<MoveNode?> OnNodeSelected { get; set; }
 
     private async Task OnNodeClick(MoveNode? node)
     {
         await OnNodeSelected.InvokeAsync(node);
+    }
+
+    /// <summary>ノードが現在表示中の位置かどうかを判定</summary>
+    private bool IsCurrentNode(MoveNode node)
+    {
+        if (MoveHistory is null || node.Depth > DisplayMoveIndex) {
+            return false;
+        }
+
+        // ノードの深さが表示位置と一致し、パスが一致するかチェック
+        if (node.Depth != DisplayMoveIndex) {
+            return false;
+        }
+
+        // ノードのパスとMoveHistoryが一致するかチェック
+        var nodePath = node.GetMoves();
+        for (int i = 0; i < nodePath.Count && i < MoveHistory.Count; i++) {
+            if (nodePath[i] != MoveHistory[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private List<MoveNode> BuildMainLine()
