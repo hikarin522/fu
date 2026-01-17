@@ -168,7 +168,7 @@
         }
     </main>
 
-    @if (WebRtcService.IsConnected && !ShowNewGameDialog)
+    @if (WebRtcService.IsConnected && !ShowNewGameDialog && GameService.State.Status != GameStatus.WaitingForConnection)
     {
     <div class="move-history">
         <div class="move-history-header">
