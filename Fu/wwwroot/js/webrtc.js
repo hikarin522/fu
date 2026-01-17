@@ -256,3 +256,52 @@ window.NicknameStorage = {
         }
     }
 };
+
+// Turn notification sound
+let audioContext = null;
+
+window.TurnNotification = {
+    play: function () {
+        try {
+            // AudioContextは初回ユーザー操作後に作成する必要がある
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            // AudioContextがsuspended状態なら再開
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            const now = audioContext.currentTime;
+
+            // 2つの音を重ねて和音のような通知音を作成
+            // 高い音（C5 = 523.25Hz）
+            const osc1 = audioContext.createOscillator();
+            const gain1 = audioContext.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.value = 523.25;
+            gain1.gain.setValueAtTime(0.3, now);
+            gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            osc1.connect(gain1);
+            gain1.connect(audioContext.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.3);
+
+            // 低い音（G4 = 392Hz）少し遅れて
+            const osc2 = audioContext.createOscillator();
+            const gain2 = audioContext.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.value = 392;
+            gain2.gain.setValueAtTime(0.2, now + 0.05);
+            gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+            osc2.connect(gain2);
+            gain2.connect(audioContext.destination);
+            osc2.start(now + 0.05);
+            osc2.stop(now + 0.35);
+
+        } catch (e) {
+            console.warn('Failed to play turn notification sound:', e);
+        }
+    }
+};

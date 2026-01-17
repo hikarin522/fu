@@ -205,11 +205,10 @@ public class ShogiGameService
 
     private async Task BranchFromCurrentPositionAsync()
     {
-        var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
-
-        // MoveHistoryの手順に沿ってMoveTreeを辿る（分岐を正しく追跡）
         // 別ブランチを見ている場合はそのブランチの棋譜を使う
         var displayHistory = this.State.DisplayBranchHistory;
+        // ViewingMoveIndexがnullの場合は表示中ブランチの最後（別ブランチの最新局面）
+        var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
         this.State.MoveTree.GoToStart();
         for (var i = 0; i < viewingIndex; i++) {
             // AddMoveは既存の同じ手があればそれを返すので、正しいパスを辿れる

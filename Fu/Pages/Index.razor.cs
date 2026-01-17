@@ -137,7 +137,23 @@ public partial class Index : IAsyncDisposable
     private async Task OnRemoteMoveReceivedAsync(Move move)
     {
         await this.GameService.ApplyRemoteMoveAsync(move);
+
+        // 自分の手番になったら通知音を鳴らす
+        if (this.IsPlayer && this.GameService.State.IsMyTurn) {
+            await this.PlayTurnNotificationAsync();
+        }
+
         await this.InvokeAsync(this.StateHasChanged);
+    }
+
+    private async Task PlayTurnNotificationAsync()
+    {
+        try {
+            await this.JS.InvokeVoidAsync("TurnNotification.play");
+        }
+        catch {
+            // 音声再生に失敗しても無視
+        }
     }
 
     private async ValueTask OnGameStateChangedAsync()
@@ -209,6 +225,12 @@ public partial class Index : IAsyncDisposable
 
         await this.GameService.SetLocalPlayerAsync(localPlayer);
         await this.GameService.NewGameAsync();
+
+        // 自分が先手（最初の手番）なら通知音を鳴らす
+        if (localPlayer == Player.Sente) {
+            await this.PlayTurnNotificationAsync();
+        }
+
         this.ShowNewGameDialog = false;
         this.StateHasChanged();
     }
@@ -269,6 +291,12 @@ public partial class Index : IAsyncDisposable
     private async Task OnBranchResumeReceivedAsync(IReadOnlyList<Move> moveHistory)
     {
         await this.GameService.ApplyBranchResumeAsync(moveHistory);
+
+        // 自分の手番になったら通知音を鳴らす
+        if (this.IsPlayer && this.GameService.State.IsMyTurn) {
+            await this.PlayTurnNotificationAsync();
+        }
+
         await this.InvokeAsync(this.StateHasChanged);
     }
 
@@ -282,6 +310,12 @@ public partial class Index : IAsyncDisposable
     {
         // ゲーム状態がPlayingに戻るので評価値表示は自動的にリセットされる
         await this.GameService.ApplyRematchAsync(moveHistory);
+
+        // 自分の手番になったら通知音を鳴らす
+        if (this.IsPlayer && this.GameService.State.IsMyTurn) {
+            await this.PlayTurnNotificationAsync();
+        }
+
         await this.InvokeAsync(this.StateHasChanged);
     }
 
