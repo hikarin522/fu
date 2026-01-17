@@ -80,7 +80,8 @@ public record GameState(
     CapturedPieces GoteCaptured,
     ImmutableList<Move> MoveHistory,
     Player LocalPlayer,
-    int? ViewingMoveIndex = null)
+    int? ViewingMoveIndex = null,
+    bool IsViewingDifferentBranch = false)
 {
     /// <summary>棋譜ツリー（分岐対応）</summary>
     public MoveTree MoveTree { get; init; } = new();
@@ -101,8 +102,9 @@ public record GameState(
     /// <summary>自分の手番かどうか</summary>
     public bool IsMyTurn => this.LocalPlayer == this.CurrentPlayer;
 
-    /// <summary>棋譜閲覧モード中かどうか（ツリーの現在位置が実際の盤面と異なる）</summary>
-    public bool IsReviewing => this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count;
+    /// <summary>棋譜閲覧モード中かどうか（過去の局面を見ている、または別のブランチを見ている）</summary>
+    public bool IsReviewing => this.IsViewingDifferentBranch ||
+                               (this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count);
 
     /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
     public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.MoveHistory.Count;

@@ -224,7 +224,8 @@ public class ShogiGameService
             GoteCaptured = goteCaptured,
             CurrentPlayer = currentPlayer,
             MoveHistory = newHistory,
-            ViewingMoveIndex = null
+            ViewingMoveIndex = null,
+            IsViewingDifferentBranch = false
         };
 
         // 分岐再開を通知（相手側に同期するため）
@@ -273,12 +274,13 @@ public class ShogiGameService
     public async Task ApplyBranchResumeAsync(IReadOnlyList<Move> moveHistory)
     {
         var localPlayer = this.State.LocalPlayer;
-        var moveTree = new MoveTree();
+        var moveTree = this.State.MoveTree; // 既存のMoveTreeを保持
 
         // 棋譜を再生して盤面を復元
         var (board, senteCaptured, goteCaptured, currentPlayer) = ReconstructBoard(moveHistory);
 
-        // MoveTree に棋譜を追加
+        // MoveTree の現在位置を棋譜に同期
+        moveTree.GoToStart();
         foreach (var move in moveHistory) {
             moveTree.AddMove(move);
         }
@@ -291,7 +293,8 @@ public class ShogiGameService
             goteCaptured,
             [.. moveHistory],
             localPlayer,
-            null
+            null,
+            false
         ) { MoveTree = moveTree };
 
         await this.NotifyStateChangedAsync();
@@ -586,7 +589,11 @@ public class ShogiGameService
     public async Task GoToLatestAsync()
     {
         if (this.State.IsReviewing) {
-            this.State = this.State with { ViewingMoveIndex = null };
+            this.State = this.State with {
+                ViewingMoveIndex = null,
+                IsViewingDifferentBranch = false
+            };
+            this.SyncMoveTreeToCurrentPosition();
             await this.NotifyStateChangedAsync();
         }
     }
@@ -615,24 +622,43 @@ public class ShogiGameService
 
         if (node is null) {
             // 開始位置に移動
-            this.State = this.State with { ViewingMoveIndex = 0 };
+            this.State = this.State with {
+                ViewingMoveIndex = 0,
+                IsViewingDifferentBranch = false
+            };
         } else {
             // ノードのパスを取得
             var nodeMoves = node.GetMoves();
 
-            // 現在のMoveHistoryと同じパスかチェック
-            var isSamePath = nodeMoves.Count <= this.State.MoveHistory.Count &&
-                             nodeMoves.Select((m, i) => (m, i)).All(x => x.m == this.State.MoveHistory[x.i]);
+            // 現在のMoveHistoryと完全に同じか（同じパスかつ同じ長さ）
+            var isExactSamePath = nodeMoves.Count == this.State.MoveHistory.Count &&
+                                  nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, this.State.MoveHistory[i])).All(x => x);
 
-            if (isSamePath) {
-                // 同じパス上なら閲覧モードで移動
-                this.State = this.State with { ViewingMoveIndex = node.Depth };
-            } else {
-                // 別の分岐なら、そのパスに切り替え（閲覧モードで）
+            if (isExactSamePath) {
+                // 完全に同じパスなら閲覧モードを解除
                 this.State = this.State with {
-                    MoveHistory = nodeMoves,
-                    ViewingMoveIndex = node.Depth
+                    ViewingMoveIndex = null,
+                    IsViewingDifferentBranch = false
                 };
+            } else {
+                // 現在のMoveHistoryの一部かチェック
+                var isSamePath = nodeMoves.Count <= this.State.MoveHistory.Count &&
+                                 nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, this.State.MoveHistory[i])).All(x => x);
+
+                if (isSamePath) {
+                    // 同じパス上なら閲覧モードで移動
+                    this.State = this.State with {
+                        ViewingMoveIndex = node.Depth,
+                        IsViewingDifferentBranch = false
+                    };
+                } else {
+                    // 別の分岐なら、そのパスに切り替え（終端を表示）
+                    this.State = this.State with {
+                        MoveHistory = nodeMoves,
+                        ViewingMoveIndex = null,
+                        IsViewingDifferentBranch = true
+                    };
+                }
             }
         }
         await this.NotifyStateChangedAsync();
