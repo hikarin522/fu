@@ -12,10 +12,10 @@ let myNickname = '';
 let currentRoomId = null;
 let participants = new Map(); // peerId -> { nickname, isHost }
 
-// Trystero actions
+// Trystero actions (names must be <= 12 bytes)
 let sendMessage = null;
-let sendParticipantInfo = null;
-let sendParticipantLeft = null;
+let sendPeerInfo = null;
+let sendPeerLeft = null;
 
 window.WebRtc = {
     initialize: function (dotNetReference) {
@@ -101,8 +101,8 @@ window.WebRtc = {
             room = null;
         }
         sendMessage = null;
-        sendParticipantInfo = null;
-        sendParticipantLeft = null;
+        sendPeerInfo = null;
+        sendPeerLeft = null;
         participants.clear();
         myPeerId = null;
         isHost = false;
@@ -119,15 +119,15 @@ async function joinTrysteroRoom(roomId) {
     const config = { appId: APP_ID };
     room = joinRoom(config, roomId);
 
-    // メッセージアクションを設定
-    const [sendMsg, onMsg] = room.makeAction('message');
+    // メッセージアクションを設定 (names must be <= 12 bytes)
+    const [sendMsg, onMsg] = room.makeAction('msg');
     sendMessage = sendMsg;
 
-    const [sendPInfo, onPInfo] = room.makeAction('participantInfo');
-    sendParticipantInfo = sendPInfo;
+    const [sendPI, onPI] = room.makeAction('peerinfo');
+    sendPeerInfo = sendPI;
 
-    const [sendPLeft, onPLeft] = room.makeAction('participantLeft');
-    sendParticipantLeft = sendPLeft;
+    const [sendPL, onPL] = room.makeAction('peerleft');
+    sendPeerLeft = sendPL;
 
     // メッセージ受信ハンドラ
     onMsg((data, peerId) => {
@@ -138,8 +138,8 @@ async function joinTrysteroRoom(roomId) {
     });
 
     // 参加者情報受信ハンドラ
-    onPInfo((data, peerId) => {
-        console.log('Participant info received from', peerId, ':', data);
+    onPI((data, peerId) => {
+        console.log('Peer info received from', peerId, ':', data);
         const info = JSON.parse(data);
         if (!participants.has(peerId)) {
             participants.set(peerId, { nickname: info.nickname, isHost: info.isHost });
@@ -150,8 +150,8 @@ async function joinTrysteroRoom(roomId) {
     });
 
     // 参加者退出受信ハンドラ
-    onPLeft((data, peerId) => {
-        console.log('Participant left:', peerId);
+    onPL((data, peerId) => {
+        console.log('Peer left:', peerId);
         participants.delete(peerId);
         if (dotNetRef) {
             dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', peerId);
@@ -163,7 +163,7 @@ async function joinTrysteroRoom(roomId) {
         console.log('Peer joined:', peerId);
 
         // 自分の情報を送信
-        sendParticipantInfo(JSON.stringify({
+        sendPeerInfo(JSON.stringify({
             nickname: myNickname,
             isHost: isHost
         }));
