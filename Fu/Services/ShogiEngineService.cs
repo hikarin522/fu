@@ -37,6 +37,8 @@ public class ShogiEngineService : IAsyncDisposable
     private bool _initialized;
     private bool _isAnalyzing;
     private readonly Dictionary<int, CandidateMove> _candidates = [];
+    private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
+    private int _newDepthCandidateCount;
 
     // 局面キャッシュ（SFEN -> 評価情報）
     private readonly Dictionary<string, CachedEvaluation> _cache = [];
@@ -66,7 +68,11 @@ public class ShogiEngineService : IAsyncDisposable
     public int Depth { get; private set; }
 
     /// <summary>候補手リスト（MultiPV）</summary>
-    public IReadOnlyList<CandidateMove> Candidates => this._candidates.Values.OrderBy(c => c.Rank).ToList();
+    /// <remarks>
+    /// 深さが増えた直後で候補手が揃っていない場合、前の深さの候補手で補完する。
+    /// 例: 深さ32で1位のみの場合、前の深さの1位→2位、2位→3位として表示。
+    /// </remarks>
+    public IReadOnlyList<CandidateMove> Candidates => this.GetMergedCandidates();
 
     /// <summary>エンジンが利用可能か</summary>
     public bool IsAvailable { get; private set; }
@@ -331,8 +337,13 @@ public class ShogiEngineService : IAsyncDisposable
             if (info.Pv is not null) {
                 this.PrincipalVariation = info.Pv;
             }
-            // 新しい深さになったら候補手をクリア（古い深さの結果を消す）
+            // 新しい深さになったら前の候補手を保存してからクリア
+            this._previousCandidates.Clear();
+            foreach (var kvp in this._candidates) {
+                this._previousCandidates[kvp.Key] = kvp.Value;
+            }
             this._candidates.Clear();
+            this._newDepthCandidateCount = 0;
         }
 
         // 候補手リストを更新（現在の深さ以上の結果のみ）
@@ -344,6 +355,7 @@ public class ShogiEngineService : IAsyncDisposable
                 normalizedMate,
                 info.Pv
             );
+            this._newDepthCandidateCount = this._candidates.Count;
         }
     }
 
@@ -379,6 +391,31 @@ public class ShogiEngineService : IAsyncDisposable
             }
         }
         return (multipv, depth, score, mateIn, pv, move);
+    }
+
+    /// <summary>候補手リストを取得（前の深さの結果で補完）</summary>
+    private List<CandidateMove> GetMergedCandidates()
+    {
+        var result = new List<CandidateMove>();
+
+        // 現在の深さの候補手を追加
+        foreach (var candidate in this._candidates.Values.OrderBy(c => c.Rank)) {
+            result.Add(candidate);
+        }
+
+        // 前の深さの候補手で補完（新しい深さで取得済みの数だけシフト）
+        if (this._previousCandidates.Count > 0 && this._newDepthCandidateCount > 0) {
+            var shift = this._newDepthCandidateCount;
+            foreach (var prev in this._previousCandidates.Values.OrderBy(c => c.Rank)) {
+                var newRank = prev.Rank + shift;
+                // 既に現在の深さで同じランクがある場合はスキップ
+                if (!this._candidates.ContainsKey(newRank)) {
+                    result.Add(prev with { Rank = newRank });
+                }
+            }
+        }
+
+        return [.. result.OrderBy(c => c.Rank)];
     }
 
     /// <summary>盤面をSFEN形式に変換</summary>
