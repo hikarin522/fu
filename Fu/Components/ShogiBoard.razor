@@ -66,20 +66,6 @@
                 {
                     var arrows = GetCandidateArrows().ToList();
                     <svg class="candidate-arrows-overlay" viewBox="0 0 450 450" preserveAspectRatio="none">
-                        <defs>
-                            @for (var index = 0; index < arrows.Count; index++)
-                            {
-                                var arrow = arrows[index];
-                                var markerSize = arrow.StrokeWidth + 4;
-                                <marker id="arrowhead-@index"
-                                        markerWidth="@markerSize" markerHeight="@(markerSize * 0.7)"
-                                        refX="@(markerSize - 1)" refY="@(markerSize * 0.35)"
-                                        orient="auto"
-                                        fill="#2266cc">
-                                    <polygon points="0 0, @markerSize @(markerSize * 0.35), 0 @(markerSize * 0.7)" />
-                                </marker>
-                            }
-                        </defs>
                         @for (var index = 0; index < arrows.Count; index++)
                         {
                             var arrow = arrows[index];
@@ -101,22 +87,46 @@
                                 var x2 = arrow.ToCol * 50 + 25;
                                 var y2 = arrow.ToRow * 50 + 25;
 
-                                @* 矢印を少し短くして駒と重ならないようにする *@
                                 var dx = x2 - x1;
                                 var dy = y2 - y1;
                                 var length = Math.Sqrt(dx * dx + dy * dy);
                                 if (length > 0)
                                 {
+                                    @* 矢印を少し短くして駒と重ならないようにする *@
                                     var shortenRatio = 15 / length;
                                     var adjX1 = x1 + dx * shortenRatio;
                                     var adjY1 = y1 + dy * shortenRatio;
                                     var adjX2 = x2 - dx * shortenRatio;
                                     var adjY2 = y2 - dy * shortenRatio;
 
+                                    @* 矢印の鏃を計算 *@
+                                    var arrowHeadLength = arrow.StrokeWidth * 2.5;
+                                    var arrowHeadWidth = arrow.StrokeWidth * 1.5;
+                                    var unitX = dx / length;
+                                    var unitY = dy / length;
+                                    var perpX = -unitY;
+                                    var perpY = unitX;
+
+                                    @* 鏃の付け根 *@
+                                    var baseX = adjX2 - unitX * arrowHeadLength;
+                                    var baseY = adjY2 - unitY * arrowHeadLength;
+
+                                    @* 鏃の左右の点 *@
+                                    var leftX = baseX + perpX * arrowHeadWidth;
+                                    var leftY = baseY + perpY * arrowHeadWidth;
+                                    var rightX = baseX - perpX * arrowHeadWidth;
+                                    var rightY = baseY - perpY * arrowHeadWidth;
+
+                                    @* 矢印の本体（線） *@
                                     <line x1="@adjX1.ToString("F1")" y1="@adjY1.ToString("F1")"
-                                          x2="@adjX2.ToString("F1")" y2="@adjY2.ToString("F1")"
+                                          x2="@baseX.ToString("F1")" y2="@baseY.ToString("F1")"
                                           stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
-                                          marker-end="url(#arrowhead-@index)"
+                                          stroke-linecap="round"
+                                          opacity="0.7" />
+
+                                    @* 矢印の鏃（path） *@
+                                    <path d="M @adjX2.ToString("F1") @adjY2.ToString("F1") L @leftX.ToString("F1") @leftY.ToString("F1") L @rightX.ToString("F1") @rightY.ToString("F1") Z"
+                                          fill="#2266cc"
                                           opacity="0.7" />
                                 }
                             }
