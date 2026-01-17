@@ -38,7 +38,7 @@ jobs:
       - name: Setup static assets for GitHub Pages
         run: |
           # .NET 10 uses staticwebassets.endpoints.json for asset resolution
-          # Copy it to wwwroot/_framework, generate blazor.boot.json (fallback), and importmap
+          # Copy it to wwwroot/_framework and generate importmap
           python3 << 'EOF'
           import json
           import os
@@ -47,7 +47,6 @@ jobs:
 
           endpoints_file = 'publish/Fu.staticwebassets.endpoints.json'
           target_endpoints = 'publish/wwwroot/_framework/staticwebassets.endpoints.json'
-          boot_file = 'publish/wwwroot/_framework/blazor.boot.json'
           index_file = 'publish/wwwroot/index.html'
 
           with open(endpoints_file, 'r') as f:
@@ -58,45 +57,22 @@ jobs:
           shutil.copy(endpoints_file, target_endpoints)
           print(f"Copied {endpoints_file} to {target_endpoints}")
 
-          # Build resources and importmap from endpoints
-          resources = {"assembly": {}, "runtime": {}}
+          # Build importmap from endpoints
           importmap_imports = {}
 
           for endpoint in data.get('Endpoints', []):
               route = endpoint.get('Route', '')
-              props = {p['Name']: p['Value'] for p in endpoint.get('EndpointProperties', [])}
 
               if not route.startswith('_framework/'):
                   continue
 
-              integrity = props.get('integrity', '')
               filename = route.replace('_framework/', '')
 
-              # Categorize resources for blazor.boot.json
-              if route.endswith('.wasm'):
-                  if 'dotnet.native' in route:
-                      resources['runtime'][filename] = integrity
-                  else:
-                      resources['assembly'][filename] = integrity
-              elif route.endswith('.js') and 'dotnet' in route:
-                  resources['runtime'][filename] = integrity
-                  # Map non-fingerprinted name to fingerprinted file for importmap
+              # Map non-fingerprinted name to fingerprinted file for importmap
+              if route.endswith('.js') and 'dotnet' in route:
                   base_name = re.sub(r'\.[a-z0-9]+\.js$', '.js', filename)
                   if base_name != filename:
                       importmap_imports[f"./{base_name}"] = f"./{filename}"
-              elif route.endswith('.dat') and 'icu' in route.lower():
-                  resources.setdefault('icu', {})[filename] = integrity
-
-          # Generate blazor.boot.json (fallback for compatibility)
-          boot_config = {
-              "mainAssemblyName": "Fu",
-              "resources": resources,
-              "cacheBootResources": False,
-              "debugLevel": 0
-          }
-          with open(boot_file, 'w') as f:
-              json.dump(boot_config, f, indent=2)
-          print(f"Generated {boot_file}")
 
           # Generate importmap and inject into index.html
           with open(index_file, 'r') as f:
