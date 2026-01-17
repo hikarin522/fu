@@ -1,5 +1,6 @@
 /*! coi-serviceworker v0.1.7 - Guido Zuidhof and contributors, licensed under MIT */
 /*! Modified to fix null body status response issue */
+/*! v2: Added no-cache headers for _framework files */
 let coepCredentialless = false;
 if (typeof window === 'undefined') {
     self.addEventListener("install", () => self.skipWaiting());
@@ -52,6 +53,13 @@ if (typeof window === 'undefined') {
                     // Fix: Check for null body status codes (101, 204, 205, 304)
                     // and also handle cases where response.body is null
                     const nullBodyStatus = [101, 204, 205, 304];
+
+                    // Prevent caching of _framework files to avoid WASM 404 errors after updates
+                    const url = new URL(request.url);
+                    if (url.pathname.includes('/_framework/') || url.pathname.includes('/blazor.boot.json')) {
+                        newHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
+                    }
+
                     if (nullBodyStatus.includes(response.status) || response.body === null) {
                         return new Response(null, {
                             status: response.status,
