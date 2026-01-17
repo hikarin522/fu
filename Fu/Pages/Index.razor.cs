@@ -550,6 +550,22 @@ public partial class Index : IAsyncDisposable
 
     private Task OnTreeNodeSelected(MoveNode? node) => this.GameService.GoToNodeAsync(node);
 
+    // 棋譜ツリーからの検討・再戦
+    private async Task OnReviewFromNodeAsync(MoveNode? node)
+    {
+        // まずそのノードに移動してから検討開始
+        await this.GameService.GoToNodeAsync(node);
+        await this.GameService.StartReviewFromCurrentPositionAsync();
+    }
+
+    private async Task OnRematchFromNodeAsync(MoveNode? node)
+    {
+        // まずそのノードに移動してから再戦
+        await this.GameService.GoToNodeAsync(node);
+        await this.GameService.RematchFromCurrentPositionAsync();
+        await this.WebRtcService.SendRematchAsync(this.GameService.State.MoveHistory);
+    }
+
     // 検討モード関連
     private async Task StartReviewFromCurrentAsync()
     {

@@ -237,7 +237,7 @@
         {
             <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
         }
-        @if (isGameOver)
+        @if (isGameOver || GameService.State.IsReviewing)
         {
             <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
             <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>

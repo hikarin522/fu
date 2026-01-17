@@ -49,6 +49,24 @@
                      title="@(row.Node?.Move.ToNotationWithFrom() ?? "")">
                     <span>@row.Label</span>
                 </div>
+
+                @if (ShowActionButtons && row.IsCurrent)
+                {
+                    <div class="tree-row-actions">
+                        @if (ShowReviewButton)
+                        {
+                            <button class="btn-tiny btn-review" @onclick="() => OnReviewFromHere.InvokeAsync(row.Node)" title="ここから検討">
+                                🔍
+                            </button>
+                        }
+                        @if (ShowRematchButton)
+                        {
+                            <button class="btn-tiny btn-rematch" @onclick="() => OnRematchFromHere.InvokeAsync(row.Node)" title="ここから再戦">
+                                ⚔️
+                            </button>
+                        }
+                    </div>
+                }
             </div>
         }
     }
@@ -59,6 +77,11 @@
     [Parameter] public IReadOnlyList<Move>? MoveHistory { get; set; }
     [Parameter] public int DisplayMoveIndex { get; set; }
     [Parameter] public EventCallback<MoveNode?> OnNodeSelected { get; set; }
+    [Parameter] public bool ShowActionButtons { get; set; }
+    [Parameter] public bool ShowReviewButton { get; set; }
+    [Parameter] public bool ShowRematchButton { get; set; }
+    [Parameter] public EventCallback<MoveNode?> OnReviewFromHere { get; set; }
+    [Parameter] public EventCallback<MoveNode?> OnRematchFromHere { get; set; }
 
     private const int ColumnWidth = 20;
     private const int RowHeight = 24;

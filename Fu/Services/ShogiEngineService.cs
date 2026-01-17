@@ -136,11 +136,15 @@ public class ShogiEngineService : IAsyncDisposable
         this._currentSfen = sfen;
         this._currentPlayer = currentPlayer;
 
-        // 詰めろチェックをリセット
-        if (!this._isCheckingThreatening) {
-            this.IsThreatening = false;
-            this.ThreateningMateIn = null;
+        // 詰めろチェック中なら中断
+        if (this._isCheckingThreatening) {
+            this._isCheckingThreatening = false;
+            this._threateningSfen = null;
         }
+
+        // 詰めろチェックをリセット（新しい局面では常にリセット）
+        this.IsThreatening = false;
+        this.ThreateningMateIn = null;
 
         // キャッシュをチェック
         if (this._cache.TryGetValue(sfen, out var cached)) {
