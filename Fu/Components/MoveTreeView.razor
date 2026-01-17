@@ -123,69 +123,136 @@
         HashSet<int> ContinuingColumns
     );
 
+    private record NodeInfo(MoveNode? Node, int Column, bool IsBranch, int ParentColumn, bool IsStart, int? EndDepth);
+
     private List<TreeLine> BuildAllLines()
     {
         if (MoveTree is null) return [];
 
         var lines = new List<TreeLine>();
-        var activeColumns = new HashSet<int>(); // 現在アクティブな列（縦線を引く）
 
-        // 開始ノード
-        activeColumns.Add(0);
-        lines.Add(new TreeLine(null, 0, 0, false, -1, true, new HashSet<int>(activeColumns)));
+        // 各深さごとにノードを収集（とそのカラム情報）
+        var nodesByDepth = new Dictionary<int, List<NodeInfo>>();
+        var nodeColumns = new Dictionary<MoveNode, int>();
+        var nodeEndDepths = new Dictionary<MoveNode, int>(); // ノードのブランチが終わる深さ
 
-        // 全ノードを深さ優先で走査
-        BuildLinesRecursive(MoveTree.RootChildren, 0, -1, lines, activeColumns);
+        // 開始ノード（深さ0）
+        var startEndDepth = MoveTree.RootChildren.Count > 0
+            ? GetMaxDepthInBranch(MoveTree.RootChildren[0])
+            : 0;
+        nodesByDepth[0] = [new NodeInfo(null, 0, false, -1, true, startEndDepth)];
+
+        // カラム割り当て（深さ優先で走査）
+        AssignColumnsToNodes(MoveTree.RootChildren, 0, -1, nodesByDepth, nodeColumns, nodeEndDepths, new HashSet<int> { 0 });
+
+        // 深さ順に行を生成
+        var maxDepth = nodesByDepth.Keys.DefaultIfEmpty(0).Max();
+
+        for (int depth = 0; depth <= maxDepth; depth++)
+        {
+            if (!nodesByDepth.TryGetValue(depth, out var nodesAtDepth)) continue;
+
+            foreach (var nodeInfo in nodesAtDepth)
+            {
+                // この深さでアクティブなカラムを計算
+                var activeColumns = new HashSet<int>();
+                foreach (var kvp in nodesByDepth)
+                {
+                    foreach (var ni in kvp.Value)
+                    {
+                        // このノードが開始した深さからEndDepthまでの間、カラムがアクティブ
+                        var nodeDepth = ni.Node?.Depth ?? 0;
+                        var endDepth = ni.EndDepth ?? nodeDepth;
+                        if (nodeDepth <= depth && depth <= endDepth)
+                        {
+                            activeColumns.Add(ni.Column);
+                        }
+                    }
+                }
+
+                var maxCol = activeColumns.Count > 0 ? activeColumns.Max() : 0;
+                lines.Add(new TreeLine(
+                    nodeInfo.Node,
+                    nodeInfo.Column,
+                    maxCol,
+                    nodeInfo.IsBranch,
+                    nodeInfo.ParentColumn,
+                    nodeInfo.IsStart,
+                    activeColumns
+                ));
+            }
+        }
 
         return lines;
     }
 
-    private void BuildLinesRecursive(
+    private void AssignColumnsToNodes(
         IReadOnlyList<MoveNode> nodes,
-        int column,
         int parentColumn,
-        List<TreeLine> lines,
-        HashSet<int> activeColumns)
+        int grandParentColumn,
+        Dictionary<int, List<NodeInfo>> nodesByDepth,
+        Dictionary<MoveNode, int> nodeColumns,
+        Dictionary<MoveNode, int> nodeEndDepths,
+        HashSet<int> usedColumns)
     {
         for (int i = 0; i < nodes.Count; i++)
         {
             var node = nodes[i];
-            var isBranch = i > 0; // 2番目以降は分岐
-            var nodeColumn = isBranch ? GetNextAvailableColumn(activeColumns) : column;
+            var isBranch = i > 0;
+            var column = isBranch ? GetNextAvailableColumn(usedColumns) : parentColumn;
 
             if (isBranch)
             {
-                activeColumns.Add(nodeColumn);
+                usedColumns.Add(column);
             }
 
-            var maxCol = activeColumns.Count > 0 ? activeColumns.Max() : 0;
-            lines.Add(new TreeLine(
+            nodeColumns[node] = column;
+
+            // このノードのブランチの終端深さを計算
+            var endDepth = GetMaxDepthInBranch(node);
+            nodeEndDepths[node] = endDepth;
+
+            var depth = node.Depth;
+            if (!nodesByDepth.ContainsKey(depth))
+            {
+                nodesByDepth[depth] = [];
+            }
+            nodesByDepth[depth].Add(new NodeInfo(
                 node,
-                nodeColumn,
-                maxCol,
+                column,
                 isBranch,
-                isBranch ? column : parentColumn,
+                isBranch ? parentColumn : grandParentColumn,
                 false,
-                new HashSet<int>(activeColumns)
+                endDepth
             ));
 
             // 子ノードを処理
             if (node.Children.Count > 0)
             {
-                BuildLinesRecursive(node.Children, nodeColumn, nodeColumn, lines, activeColumns);
+                AssignColumnsToNodes(node.Children, column, column, nodesByDepth, nodeColumns, nodeEndDepths, usedColumns);
             }
             else
             {
-                // 終端ノードの場合、この列を非アクティブに
-                activeColumns.Remove(nodeColumn);
+                // 終端ノードの場合、このカラムを解放（再利用可能に）
+                usedColumns.Remove(column);
             }
         }
     }
 
-    private int GetNextAvailableColumn(HashSet<int> activeColumns)
+    private static int GetMaxDepthInBranch(MoveNode node)
+    {
+        if (node.Children.Count == 0)
+        {
+            return node.Depth;
+        }
+        // メインライン（最初の子）の終端深さを返す
+        return GetMaxDepthInBranch(node.Children[0]);
+    }
+
+    private static int GetNextAvailableColumn(HashSet<int> usedColumns)
     {
         int col = 0;
-        while (activeColumns.Contains(col))
+        while (usedColumns.Contains(col))
         {
             col++;
         }
