@@ -133,6 +133,9 @@ public class ShogiGameService
 
         if (this.State.IsReviewing) {
             await this.BranchFromCurrentPositionAsync();
+        } else {
+            // 通常の対局中でも、MoveTreeのCurrentNodeをMoveHistoryと同期する
+            this.SyncMoveTreeToCurrentPosition();
         }
 
         if (move.IsDrop) {
@@ -546,9 +549,36 @@ public class ShogiGameService
     private void SyncMoveTreeToViewingPosition()
     {
         var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
+        this.SyncMoveTreeToPosition(viewingIndex);
+    }
+
+    /// <summary>MoveTreeのCurrentNodeをMoveHistoryの現在位置に同期する</summary>
+    private void SyncMoveTreeToCurrentPosition()
+    {
+        this.SyncMoveTreeToPosition(this.State.MoveHistory.Count);
+    }
+
+    private void SyncMoveTreeToPosition(int targetIndex)
+    {
+        // MoveTreeの現在位置を確認
+        var currentDepth = this.State.MoveTree.CurrentDepth;
+
+        // 既に正しい位置にあればスキップ
+        if (currentDepth == targetIndex) {
+            // 念のため、手が一致するか確認
+            var currentMoves = this.State.MoveTree.CurrentLine;
+            var historySlice = this.State.MoveHistory.Take(targetIndex).ToList();
+            if (currentMoves.Count == historySlice.Count &&
+                currentMoves.Select((m, i) => m == historySlice[i]).All(x => x)) {
+                return;
+            }
+        }
+
+        // 位置がずれているので再同期
         this.State.MoveTree.GoToStart();
-        for (var i = 0; i < viewingIndex; i++) {
-            this.State.MoveTree.GoForward();
+        for (var i = 0; i < targetIndex && i < this.State.MoveHistory.Count; i++) {
+            // 既存の手を辿る（AddMoveは同じ手があればそれを返す）
+            this.State.MoveTree.AddMove(this.State.MoveHistory[i]);
         }
     }
 
