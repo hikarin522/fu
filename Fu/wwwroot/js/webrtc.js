@@ -1,5 +1,7 @@
 // WebRTC P2P Communication using PeerJS (Star topology - Host relays messages)
 
+const NICKNAME_STORAGE_KEY = 'fu_nickname';
+
 let peer = null;
 let connections = new Map(); // peerId -> connection (for host)
 let hostConnection = null; // for non-host
@@ -323,3 +325,23 @@ function generateRoomId() {
     }
     return result;
 }
+
+// Nickname storage
+window.NicknameStorage = {
+    save: function (nickname) {
+        try {
+            localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
+        } catch (e) {
+            console.warn('Failed to save nickname to localStorage:', e);
+        }
+    },
+
+    load: function () {
+        try {
+            return localStorage.getItem(NICKNAME_STORAGE_KEY) || '';
+        } catch (e) {
+            console.warn('Failed to load nickname from localStorage:', e);
+            return '';
+        }
+    }
+};

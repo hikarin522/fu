@@ -27,6 +27,7 @@ public partial class ConnectionPanel : IDisposable
     private bool IsJoiningRoom { get; set; }
 
     private string RoomUrl => string.IsNullOrEmpty(this.RoomId) ? "" : $"{this.BaseUrl}{this.RoomId}";
+    private bool HasInitialRoomId => !string.IsNullOrEmpty(this.InitialRoomId);
 
     protected override void OnInitialized()
     {
@@ -36,10 +37,21 @@ public partial class ConnectionPanel : IDisposable
             this.WebRtcService.OnParticipantLeft += this.OnParticipantLeftAsync;
         }
 
-        // URL パラメータからルーム ID が指定されている場合は参加フォームを表示
-        if (!string.IsNullOrEmpty(this.InitialRoomId)) {
-            this.InputRoomId = this.InitialRoomId.ToUpperInvariant();
-            this.IsJoiningRoom = true;
+        // URL パラメータからルーム ID が指定されている場合は設定
+        if (this.HasInitialRoomId) {
+            this.InputRoomId = this.InitialRoomId!.ToUpperInvariant();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) {
+            // localStorage から前回のニックネームを読み込む
+            var savedNickname = await this.JS.InvokeAsync<string>("NicknameStorage.load");
+            if (!string.IsNullOrEmpty(savedNickname)) {
+                this.InputNickname = savedNickname;
+                this.StateHasChanged();
+            }
         }
     }
 
@@ -64,15 +76,30 @@ public partial class ConnectionPanel : IDisposable
         return this.InvokeAsync(this.StateHasChanged);
     }
 
-    private void ShowJoinForm()
+    private async Task ShowJoinForm()
     {
         this.Nickname = this.InputNickname.Trim();
+        await this.SaveNicknameAsync(this.Nickname);
         this.IsJoiningRoom = true;
+    }
+
+    private async Task SaveNicknameAsync(string nickname)
+    {
+        await this.JS.InvokeVoidAsync("NicknameStorage.save", nickname);
     }
 
     private Task CreateRoomWithNickname() => this.ExecuteWithProcessing(async () => {
         this.Nickname = this.InputNickname.Trim();
+        await this.SaveNicknameAsync(this.Nickname);
         this.RoomId = (await this.WebRtcService.CreateRoomAsync(this.Nickname)).AsPrimitive();
+    });
+
+    private Task JoinRoomWithNickname() => this.ExecuteWithProcessing(async () => {
+        this.Nickname = this.InputNickname.Trim();
+        await this.SaveNicknameAsync(this.Nickname);
+        await this.WebRtcService.JoinRoomAsync(
+            new RoomId(this.InputRoomId.Trim().ToUpperInvariant()),
+            this.Nickname);
     });
 
     private Task JoinRoom() => this.ExecuteWithProcessing(async () => {

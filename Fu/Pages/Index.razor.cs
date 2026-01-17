@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
@@ -45,7 +47,11 @@ public partial class Index : IAsyncDisposable
             this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
             this.WebRtcService.OnGameStartWithPlayers += this.OnGameStartWithPlayersAsync;
             this.WebRtcService.OnResignReceived += this.OnRemoteResignReceivedAsync;
+            this.WebRtcService.OnGameStateRequested += this.OnGameStateRequestedAsync;
+            this.WebRtcService.OnGameStateSyncReceived += this.OnGameStateSyncReceivedAsync;
+            this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
             this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
+            this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
         }
         catch (Exception ex) {
             this.InitError = ex.Message;
@@ -57,12 +63,16 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private Task OnDataChannelReadyAsync()
+    private async Task OnDataChannelReadyAsync()
     {
-        return this.InvokeAsync(() => {
-            // 接続後、最初は対局ダイアログを表示（ホストの場合）
+        await this.InvokeAsync(async () => {
             if (this.WebRtcService.IsHost) {
+                // ホストの場合は対局ダイアログを表示
                 this.ShowNewGameDialog = true;
+            }
+            else {
+                // 非ホストの場合は現在のゲーム状態をリクエスト
+                await this.WebRtcService.SendGameStateRequestAsync();
             }
             this.StateHasChanged();
         });
@@ -144,6 +154,57 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(this.StateHasChanged);
     }
 
+    private async Task OnGameStateRequestedAsync()
+    {
+        // ホストがゲーム状態リクエストを受信したら、現在の状態を送信
+        if (this.WebRtcService.IsHost && this.GameService.State.Status != GameStatus.WaitingForConnection) {
+            await this.WebRtcService.SendGameStateSyncAsync(
+                this.GameService.State.MoveHistory,
+                this.SentePeerId ?? "",
+                this.GotePeerId ?? "",
+                this.SenteNickname,
+                this.GoteNickname,
+                this.GameService.State.Status
+            );
+        }
+    }
+
+    private async Task OnGameStateSyncReceivedAsync(GameStateSyncInfo info)
+    {
+        await this.InvokeAsync(async () => {
+            // 対局者情報を設定
+            this.SentePeerId = info.SentePeerId;
+            this.GotePeerId = info.GotePeerId;
+            this.SenteNickname = info.SenteNickname;
+            this.GoteNickname = info.GoteNickname;
+
+            // 自分が対局者かどうかを判定
+            var localPlayer = this.WebRtcService.MyPeerId == info.SentePeerId ? Player.Sente
+                : this.WebRtcService.MyPeerId == info.GotePeerId ? Player.Gote
+                : Player.None;
+
+            await this.GameService.SetLocalPlayerAsync(localPlayer);
+
+            // ゲーム状態を復元
+            await this.GameService.RestoreStateAsync(info.MoveHistory, info.Status);
+
+            this.ShowNewGameDialog = false;
+            this.StateHasChanged();
+        });
+    }
+
+    private async Task OnBranchResumeReceivedAsync(IReadOnlyList<Move> moveHistory)
+    {
+        await this.GameService.ApplyBranchResumeAsync(moveHistory);
+        await this.InvokeAsync(this.StateHasChanged);
+    }
+
+    private async ValueTask OnBranchResumedAsync(ImmutableList<Move> moveHistory)
+    {
+        // 分岐再開を相手に通知
+        await this.WebRtcService.SendBranchResumeAsync(moveHistory);
+    }
+
     private async Task DownloadKifAsync()
     {
         var kif = KifExporter.Export(
@@ -172,7 +233,11 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReadyAsync;
         this.WebRtcService.OnGameStartWithPlayers -= this.OnGameStartWithPlayersAsync;
         this.WebRtcService.OnResignReceived -= this.OnRemoteResignReceivedAsync;
+        this.WebRtcService.OnGameStateRequested -= this.OnGameStateRequestedAsync;
+        this.WebRtcService.OnGameStateSyncReceived -= this.OnGameStateSyncReceivedAsync;
+        this.WebRtcService.OnBranchResumeReceived -= this.OnBranchResumeReceivedAsync;
         this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
+        this.GameService.OnBranchResumedAsync -= this.OnBranchResumedAsync;
         await this.WebRtcService.DisposeAsync();
         GC.SuppressFinalize(this);
     }

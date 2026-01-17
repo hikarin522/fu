@@ -46,6 +46,9 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public event Func<string, Task>? OnParticipantLeft;
     public event Func<GameStartInfo, Task>? OnGameStartWithPlayers;
     public event Func<Task>? OnResignReceived;
+    public event Func<Task>? OnGameStateRequested;
+    public event Func<GameStateSyncInfo, Task>? OnGameStateSyncReceived;
+    public event Func<IReadOnlyList<Move>, Task>? OnBranchResumeReceived;
 
     public async Task InitializeAsync()
     {
@@ -83,6 +86,24 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 
     public Task SendResignAsync() =>
         this.SendMessageAsync(new ResignMessage());
+
+    public Task SendGameStateRequestAsync() =>
+        this.SendMessageAsync(new GameStateRequestMessage());
+
+    public Task SendGameStateSyncAsync(IEnumerable<Move> moveHistory, string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, GameStatus status) =>
+        this.SendMessageAsync(new GameStateSyncMessage(
+            moveHistory.Select(m => m.ToDto()).ToArray(),
+            sentePeerId,
+            gotePeerId,
+            senteNickname,
+            goteNickname,
+            status.ToString()
+        ));
+
+    public Task SendBranchResumeAsync(IEnumerable<Move> moveHistory) =>
+        this.SendMessageAsync(new BranchResumeMessage(
+            moveHistory.Select(m => m.ToDto()).ToArray()
+        ));
 
     private async Task SendMessageAsync<T>(T message) where T : WebRtcMessage
     {
@@ -187,6 +208,36 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                         await resignHandler();
                     }
                     break;
+
+                case "gameStateRequest":
+                    if (OnGameStateRequested is { } requestHandler) {
+                        await requestHandler();
+                    }
+                    break;
+
+                case "gameStateSync":
+                    var syncMessage = JsonSerializer.Deserialize<GameStateSyncMessage>(message, JsonConfig.Options);
+                    if (syncMessage is not null && OnGameStateSyncReceived is { } syncHandler) {
+                        var moves = syncMessage.MoveHistory.Select(Move.FromDto).ToList();
+                        var status = Enum.TryParse<GameStatus>(syncMessage.Status, out var s) ? s : GameStatus.WaitingForConnection;
+                        await syncHandler(new GameStateSyncInfo(
+                            moves,
+                            syncMessage.SentePeerId,
+                            syncMessage.GotePeerId,
+                            syncMessage.SenteNickname,
+                            syncMessage.GoteNickname,
+                            status
+                        ));
+                    }
+                    break;
+
+                case "branchResume":
+                    var branchMessage = JsonSerializer.Deserialize<BranchResumeMessage>(message, JsonConfig.Options);
+                    if (branchMessage is not null && OnBranchResumeReceived is { } branchHandler) {
+                        var branchMoves = branchMessage.MoveHistory.Select(Move.FromDto).ToList();
+                        await branchHandler(branchMoves);
+                    }
+                    break;
             }
         }
         catch (JsonException) {
@@ -214,3 +265,13 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 
 /// <summary>対局開始情報</summary>
 public record GameStartInfo(string SentePeerId, string GotePeerId, string SenteNickname, string GoteNickname);
+
+/// <summary>ゲーム状態同期情報</summary>
+public record GameStateSyncInfo(
+    IReadOnlyList<Move> MoveHistory,
+    string SentePeerId,
+    string GotePeerId,
+    string SenteNickname,
+    string GoteNickname,
+    GameStatus Status
+);

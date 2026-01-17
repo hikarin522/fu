@@ -15,18 +15,31 @@
                     <input type="text" @bind="InputNickname" @bind:event="oninput"
                            placeholder="ニックネーム" maxlength="20" />
                 </div>
-                <div class="connection-buttons">
-                    <button class="btn primary large" @onclick="CreateRoomWithNickname"
-                            disabled="@(InputNickname.Length < 1 || IsProcessing)">
-                        @(IsProcessing ? "作成中..." : "ルームを作成")
-                        <span class="hint">ホストとして参加</span>
-                    </button>
-                    <button class="btn secondary large" @onclick="ShowJoinForm"
-                            disabled="@(InputNickname.Length < 1)">
-                        ルームに参加
-                        <span class="hint">コードを入力して参加</span>
-                    </button>
-                </div>
+                @if (HasInitialRoomId)
+                {
+                    <div class="connection-buttons">
+                        <button class="btn primary large" @onclick="JoinRoomWithNickname"
+                                disabled="@(InputNickname.Length < 1 || IsProcessing)">
+                            @(IsProcessing ? "参加中..." : "ルームに参加")
+                            <span class="hint">招待されたルームに参加</span>
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="connection-buttons">
+                        <button class="btn primary large" @onclick="CreateRoomWithNickname"
+                                disabled="@(InputNickname.Length < 1 || IsProcessing)">
+                            @(IsProcessing ? "作成中..." : "ルームを作成")
+                            <span class="hint">ホストとして参加</span>
+                        </button>
+                        <button class="btn secondary large" @onclick="ShowJoinForm"
+                                disabled="@(InputNickname.Length < 1)">
+                            ルームに参加
+                            <span class="hint">コードを入力して参加</span>
+                        </button>
+                    </div>
+                }
             </div>
         }
         else if (IsJoiningRoom)

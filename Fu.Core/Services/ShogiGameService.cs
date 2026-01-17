@@ -13,9 +13,13 @@ public class ShogiGameService
     public GameState State { get; private set; } = GameState.Initial;
 
     public event Func<ValueTask>? OnStateChangedAsync;
+    public event Func<ImmutableList<Move>, ValueTask>? OnBranchResumedAsync;
 
     private ValueTask NotifyStateChangedAsync() =>
         OnStateChangedAsync is { } handler ? handler() : ValueTask.CompletedTask;
+
+    private ValueTask NotifyBranchResumedAsync(ImmutableList<Move> moveHistory) =>
+        OnBranchResumedAsync is { } handler ? handler(moveHistory) : ValueTask.CompletedTask;
 
     public async Task NewGameAsync()
     {
@@ -195,7 +199,7 @@ public class ShogiGameService
         return true;
     }
 
-    private Task BranchFromCurrentPositionAsync()
+    private async Task BranchFromCurrentPositionAsync()
     {
         var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
 
@@ -217,7 +221,8 @@ public class ShogiGameService
             ViewingMoveIndex = null
         };
 
-        return Task.CompletedTask;
+        // 分岐再開を通知（相手側に同期するため）
+        await this.NotifyBranchResumedAsync(newHistory);
     }
 
     private async Task<bool> TryDropPieceAsync(Move move)
@@ -257,6 +262,34 @@ public class ShogiGameService
 
     public Task ApplyRemoteMoveAsync(Move move) =>
         this.TryMakeMoveAsync(move.WithPlayer(this.State.CurrentPlayer));
+
+    /// <summary>リモートからの分岐再開を適用</summary>
+    public async Task ApplyBranchResumeAsync(IReadOnlyList<Move> moveHistory)
+    {
+        var localPlayer = this.State.LocalPlayer;
+        var moveTree = new MoveTree();
+
+        // 棋譜を再生して盤面を復元
+        var (board, senteCaptured, goteCaptured, currentPlayer) = ReconstructBoard(moveHistory);
+
+        // MoveTree に棋譜を追加
+        foreach (var move in moveHistory) {
+            moveTree.AddMove(move);
+        }
+
+        this.State = new GameState(
+            board,
+            currentPlayer,
+            GameStatus.Playing,
+            senteCaptured,
+            goteCaptured,
+            [.. moveHistory],
+            localPlayer,
+            null
+        ) { MoveTree = moveTree };
+
+        await this.NotifyStateChangedAsync();
+    }
 
     public bool CanPromote(Position from, Position to)
     {
@@ -430,6 +463,34 @@ public class ShogiGameService
         this.State = this.State with {
             Status = this.State.CurrentPlayer.GetOpponent().GetWinStatus()
         };
+        await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>途中参加者向けにゲーム状態を復元</summary>
+    public async Task RestoreStateAsync(IReadOnlyList<Move> moveHistory, GameStatus status)
+    {
+        var localPlayer = this.State.LocalPlayer;
+        var moveTree = new MoveTree();
+
+        // 棋譜を再生して盤面を復元
+        var (board, senteCaptured, goteCaptured, currentPlayer) = ReconstructBoard(moveHistory);
+
+        // MoveTree に棋譜を追加
+        foreach (var move in moveHistory) {
+            moveTree.AddMove(move);
+        }
+
+        this.State = new GameState(
+            board,
+            currentPlayer,
+            status,
+            senteCaptured,
+            goteCaptured,
+            [.. moveHistory],
+            localPlayer,
+            null
+        ) { MoveTree = moveTree };
+
         await this.NotifyStateChangedAsync();
     }
 
