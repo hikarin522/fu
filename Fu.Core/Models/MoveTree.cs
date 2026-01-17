@@ -28,8 +28,8 @@ public sealed class MoveNode
     /// <summary>子ノードを追加</summary>
     public MoveNode AddChild(Move move)
     {
-        // 同じ手が既にあればそれを返す
-        var existing = this.Children.FirstOrDefault(c => c.Move == move);
+        // 同じ手が既にあればそれを返す（PlayerとCapturedPieceは比較から除外）
+        var existing = this.Children.FirstOrDefault(c => IsSameMove(c.Move, move));
         if (existing is not null) {
             return existing;
         }
@@ -38,6 +38,14 @@ public sealed class MoveNode
         this.Children = this.Children.Add(child);
         return child;
     }
+
+    /// <summary>棋譜ツリー上で同じ手とみなすか（Player,CapturedPieceは無視）</summary>
+    internal static bool IsSameMove(Move a, Move b) =>
+        a.To == b.To &&
+        a.PieceType == b.PieceType &&
+        a.IsPromotion == b.IsPromotion &&
+        a.IsDrop == b.IsDrop &&
+        a.From == b.From;
 
     /// <summary>ルートからこのノードまでのパスを取得</summary>
     public ImmutableList<MoveNode> GetPath()
@@ -90,8 +98,8 @@ public sealed class MoveTree
     public MoveNode AddMove(Move move)
     {
         if (this.CurrentNode is null) {
-            // ルートに追加
-            var existing = this._rootChildren.FirstOrDefault(c => c.Move == move);
+            // ルートに追加（PlayerとCapturedPieceは比較から除外）
+            var existing = this._rootChildren.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, move));
             if (existing is not null) {
                 this.CurrentNode = existing;
                 return existing;
