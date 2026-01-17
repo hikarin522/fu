@@ -115,13 +115,8 @@ public partial class ShogiBoard
 
     private static bool CanPromoteOnDisplayBoard(Position from, Position to, Piece piece)
     {
-        if (!piece.Type.CanPromote() || piece.Type.IsPromoted()) {
-            return false;
-        }
-
-        const int sentePromotionBoundary = 2;
-        const int gotePromotionBoundary = 6;
-
+        if (!piece.Type.CanPromote() || piece.Type.IsPromoted()) return false;
+        const int sentePromotionBoundary = 2, gotePromotionBoundary = 6;
         return piece.Owner == Player.Sente
             ? from.Row <= sentePromotionBoundary || to.Row <= sentePromotionBoundary
             : from.Row >= gotePromotionBoundary || to.Row >= gotePromotionBoundary;
@@ -130,7 +125,6 @@ public partial class ShogiBoard
     private static bool MustPromoteOnDisplayBoard(Position to, Piece piece)
     {
         var effectiveRow = piece.Owner == Player.Sente ? to.Row : Board.Size - 1 - to.Row;
-
         return piece.Type switch {
             PieceType.Pawn or PieceType.Lance => effectiveRow == 0,
             PieceType.Knight => effectiveRow <= 1,
@@ -241,39 +235,27 @@ public partial class ShogiBoard
     /// <summary>候補手の矢印データを取得</summary>
     private IEnumerable<ArrowData> GetCandidateArrows()
     {
-        if (this.CandidateMoves is null || this.CandidateMoves.Count == 0) {
-            yield break;
-        }
+        if (this.CandidateMoves is not { Count: > 0 }) yield break;
 
-        var colors = new[] { "#ff4444", "#4488ff", "#44aa44" }; // 1位:赤, 2位:青, 3位:緑
+        // 太さで順位を表現: 1位=10, 2位=6, 3位=3
+        var strokeWidths = new[] { 10, 6, 3 };
 
         foreach (var candidate in this.CandidateMoves.Take(3)) {
-            var parsed = ShogiEngineService.ParseSfenMove(candidate.Move);
-            if (parsed is not { } move) {
-                continue;
-            }
-
-            var color = colors[Math.Min(candidate.Rank - 1, colors.Length - 1)];
+            if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) continue;
             var (from, to) = move;
 
-            // 盤面の反転を考慮した座標変換
-            var (toDisplayCol, toDisplayRow) = this.IsFlipped
-                ? (8 - to.col, 8 - to.row)
-                : (to.col, to.row);
+            var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
+            var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
 
             if (from is { } f) {
-                // 通常の移動
-                var (fromDisplayCol, fromDisplayRow) = this.IsFlipped
-                    ? (8 - f.col, 8 - f.row)
-                    : (f.col, f.row);
-                yield return new ArrowData(fromDisplayCol, fromDisplayRow, toDisplayCol, toDisplayRow, color, false);
+                var fromDisplay = this.IsFlipped ? (8 - f.col, 8 - f.row) : (f.col, f.row);
+                yield return new ArrowData(fromDisplay.Item1, fromDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, false);
             }
             else {
-                // 駒打ち（移動先のみ表示）
-                yield return new ArrowData(toDisplayCol, toDisplayRow, toDisplayCol, toDisplayRow, color, true);
+                yield return new ArrowData(toDisplay.Item1, toDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, true);
             }
         }
     }
 
-    private sealed record ArrowData(int FromCol, int FromRow, int ToCol, int ToRow, string Color, bool IsDrop);
+    private sealed record ArrowData(int FromCol, int FromRow, int ToCol, int ToRow, int StrokeWidth, bool IsDrop);
 }

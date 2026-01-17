@@ -150,69 +150,60 @@ public class ShogiEngineService : IAsyncDisposable
     private void ParseInfoMessage(string message)
     {
         var parts = message.Split(' ');
-        int? multipv = null;
-        int? depth = null;
-        int? score = null;
-        int? mateIn = null;
-        string? pv = null;
-        string? move = null;
+        var info = ParseUsiInfo(parts);
+
+        // メインの評価値を更新（multipv=1または指定なしの場合）
+        if (info.MultiPv is null or 1) {
+            if (info.Depth.HasValue) this.Depth = info.Depth.Value;
+            if (info.Score.HasValue) {
+                this.Evaluation = info.Score.Value;
+                this.MateIn = info.MateIn;
+            }
+            if (info.Pv is not null) this.PrincipalVariation = info.Pv;
+        }
+
+        // 候補手リストを更新
+        if (info.MultiPv.HasValue && info.Move is not null) {
+            this._candidates[info.MultiPv.Value] = new CandidateMove(
+                info.MultiPv.Value,
+                info.Move,
+                info.Score,
+                info.MateIn,
+                info.Pv
+            );
+        }
+    }
+
+    private static (int? MultiPv, int? Depth, int? Score, int? MateIn, string? Pv, string? Move) ParseUsiInfo(string[] parts)
+    {
+        int? multipv = null, depth = null, score = null, mateIn = null;
+        string? pv = null, move = null;
 
         for (var i = 0; i < parts.Length; i++) {
             switch (parts[i]) {
                 case "multipv" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var mpv):
                     multipv = mpv;
                     break;
-
                 case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var d):
                     depth = d;
                     break;
-
                 case "score" when i + 2 < parts.Length:
                     if (parts[i + 1] == "cp" && int.TryParse(parts[i + 2], out var cp)) {
                         score = cp;
-                        mateIn = null;
                     }
                     else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
-                        // 詰み: 正の値は先手勝ち、負の値は後手勝ち
                         score = mate > 0 ? 30000 - mate : -30000 - mate;
                         mateIn = mate;
                     }
                     break;
-
                 case "pv" when i + 1 < parts.Length:
                     var pvParts = parts.Skip(i + 1).ToArray();
                     pv = string.Join(" ", pvParts);
-                    if (pvParts.Length > 0) {
-                        move = pvParts[0];
-                    }
+                    if (pvParts.Length > 0) move = pvParts[0];
                     break;
             }
         }
-
-        // メインの評価値を更新（multipv=1または指定なしの場合）
-        if (multipv is null or 1) {
-            if (depth.HasValue) {
-                this.Depth = depth.Value;
-            }
-            if (score.HasValue) {
-                this.Evaluation = score.Value;
-                this.MateIn = mateIn;
-            }
-            if (pv is not null) {
-                this.PrincipalVariation = pv;
-            }
-        }
-
-        // 候補手リストを更新
-        if (multipv.HasValue && move is not null) {
-            this._candidates[multipv.Value] = new CandidateMove(
-                multipv.Value,
-                move,
-                score,
-                mateIn,
-                pv
-            );
-        }
+        return (multipv, depth, score, mateIn, pv, move);
     }
 
     /// <summary>盤面をSFEN形式に変換</summary>
@@ -259,23 +250,13 @@ public class ShogiEngineService : IAsyncDisposable
 
     private static string PieceToSfen(Piece piece)
     {
-        var c = piece.Type switch {
-            PieceType.King => "K",
-            PieceType.Rook => "R",
-            PieceType.Bishop => "B",
-            PieceType.Gold => "G",
-            PieceType.Silver => "S",
-            PieceType.Knight => "N",
-            PieceType.Lance => "L",
-            PieceType.Pawn => "P",
-            PieceType.PromotedRook => "+R",
-            PieceType.PromotedBishop => "+B",
-            PieceType.PromotedSilver => "+S",
-            PieceType.PromotedKnight => "+N",
-            PieceType.PromotedLance => "+L",
-            PieceType.PromotedPawn => "+P",
-            _ => ""
+        var basePiece = piece.Type.IsPromoted() ? piece.Type.GetUnpromotedType() : piece.Type;
+        var c = basePiece switch {
+            PieceType.King => "K", PieceType.Rook => "R", PieceType.Bishop => "B",
+            PieceType.Gold => "G", PieceType.Silver => "S", PieceType.Knight => "N",
+            PieceType.Lance => "L", PieceType.Pawn => "P", _ => ""
         };
+        if (piece.Type.IsPromoted()) c = "+" + c;
         return piece.Owner == Player.Sente ? c : c.ToLowerInvariant();
     }
 

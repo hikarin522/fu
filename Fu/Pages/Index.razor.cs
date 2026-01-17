@@ -42,7 +42,7 @@ public partial class Index : IAsyncDisposable
     private string SelectedSentePeerId { get; set; } = "";
     private string SelectedGotePeerId { get; set; } = "";
 
-    // 対局者向け評価値表示オプション
+    // 対局者向け評価値表示オプション（ダイアログ用）
     private bool OptShowAdvantage { get; set; }
     private bool OptShowEvaluationValue { get; set; }
     private bool OptShowHasMate { get; set; }
@@ -51,25 +51,20 @@ public partial class Index : IAsyncDisposable
     // 現在のゲームに適用されている評価値表示オプション
     private EvaluationDisplayOptions CurrentEvaluationOptions { get; set; } = new();
 
-    // 対局者かどうか
+    // 役割判定
     private bool IsPlayer => this.WebRtcService.MyPeerId == this.SentePeerId ||
                              this.WebRtcService.MyPeerId == this.GotePeerId;
     private bool IsSpectator => !this.IsPlayer && this.GameService.State.Status == GameStatus.Playing;
-
-    // 対局が終了したか（勝敗が決まった状態）
     private bool IsGameEnded => this.GameService.State.Status.IsGameOver();
 
-    // 評価値表示の各要素が有効か（観戦者・対局終了後は常に全表示、対局中の対局者はオプション次第）
-    private bool ShowAdvantage => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
-    private bool ShowEvaluationValue => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
-    private bool ShowHasMate => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
-    private bool ShowMateCount => this.IsSpectator || this.IsGameEnded || (this.IsPlayer && this.CurrentEvaluationOptions.ShowMateCount);
-
-    // 評価バー自体を表示するか（何か1つでも有効なら表示）
+    // 評価値表示（観戦者・対局終了後は常に全表示）
+    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded;
+    private bool ShowAdvantage => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
+    private bool ShowEvaluationValue => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
+    private bool ShowHasMate => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
+    private bool ShowMateCount => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowMateCount);
     private bool ShowEvaluation => this.ShowAdvantage || this.ShowEvaluationValue || this.ShowHasMate;
-
-    // 候補手矢印を表示するか（観戦者または対局終了後）
-    private bool ShowCandidateArrows => this.IsSpectator || this.IsGameEnded;
+    private bool ShowCandidateArrows => this.CanShowAllEvaluation;
 
     // Cross-Origin Isolationのリロードが必要かどうか
     private bool NeedsReload { get; set; }
@@ -340,15 +335,12 @@ public partial class Index : IAsyncDisposable
     /// <summary>Cross-Origin Isolationが無効な場合、Service Workerを有効にするためにリロードする</summary>
     private async Task CheckAndReloadForCrossOriginIsolationAsync()
     {
-        // crossOriginIsolatedが有効かチェックし、無効なら自動リロード
-        var shouldReload = await this.JS.InvokeAsync<bool>("eval", @"
+        var shouldReload = await this.JS.InvokeAsync<bool>("eval", """
             (function() {
-                // 既にcrossOriginIsolatedなら不要
                 if (window.crossOriginIsolated === true) {
                     sessionStorage.removeItem('coi-reload-count');
                     return false;
                 }
-
                 const key = 'coi-reload-count';
                 const count = parseInt(sessionStorage.getItem(key) || '0');
                 if (count < 2) {
@@ -357,7 +349,8 @@ public partial class Index : IAsyncDisposable
                 }
                 return false;
             })()
-        ");
+            """
+        );
 
         if (shouldReload) {
             this.NeedsReload = true;

@@ -70,12 +70,13 @@
                             @for (var index = 0; index < arrows.Count; index++)
                             {
                                 var arrow = arrows[index];
+                                var markerSize = arrow.StrokeWidth + 4;
                                 <marker id="arrowhead-@index"
-                                        markerWidth="10" markerHeight="7"
-                                        refX="9" refY="3.5"
+                                        markerWidth="@markerSize" markerHeight="@(markerSize * 0.7)"
+                                        refX="@(markerSize - 1)" refY="@(markerSize * 0.35)"
                                         orient="auto"
-                                        fill="@arrow.Color">
-                                    <polygon points="0 0, 10 3.5, 0 7" />
+                                        fill="#2266cc">
+                                    <polygon points="0 0, @markerSize @(markerSize * 0.35), 0 @(markerSize * 0.7)" />
                                 </marker>
                             }
                         </defs>
@@ -87,8 +88,9 @@
                                 @* 駒打ちはマーカー（円）で表示 *@
                                 var cx = arrow.ToCol * 50 + 25;
                                 var cy = arrow.ToRow * 50 + 25;
-                                <circle cx="@cx" cy="@cy" r="18"
-                                        fill="none" stroke="@arrow.Color" stroke-width="4"
+                                var radius = 12 + arrow.StrokeWidth;
+                                <circle cx="@cx" cy="@cy" r="@radius"
+                                        fill="none" stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
                                         opacity="0.7" />
                             }
                             else
@@ -113,7 +115,7 @@
 
                                     <line x1="@adjX1.ToString("F1")" y1="@adjY1.ToString("F1")"
                                           x2="@adjX2.ToString("F1")" y2="@adjY2.ToString("F1")"
-                                          stroke="@arrow.Color" stroke-width="6"
+                                          stroke="#2266cc" stroke-width="@arrow.StrokeWidth"
                                           marker-end="url(#arrowhead-@index)"
                                           opacity="0.7" />
                                 }
