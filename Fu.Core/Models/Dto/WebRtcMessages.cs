@@ -61,3 +61,8 @@ public sealed record GameStateRequestMessage() : WebRtcMessage("gameStateRequest
 /// 分岐再開メッセージ（棋譜の途中から再開する場合）
 /// </summary>
 public sealed record BranchResumeMessage(MoveDto[] MoveHistory) : WebRtcMessage("branchResume");
+
+/// <summary>
+/// 再戦メッセージ（評価値表示をリセットして新しいゲームとして再開）
+/// </summary>
+public sealed record RematchMessage(MoveDto[] MoveHistory) : WebRtcMessage("rematch");

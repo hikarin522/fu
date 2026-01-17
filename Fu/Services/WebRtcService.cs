@@ -50,6 +50,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     public event Func<Task>? OnGameStateRequested;
     public event Func<GameStateSyncInfo, Task>? OnGameStateSyncReceived;
     public event Func<IReadOnlyList<Move>, Task>? OnBranchResumeReceived;
+    public event Func<IReadOnlyList<Move>, Task>? OnRematchReceived;
 
     public async Task InitializeAsync()
     {
@@ -106,6 +107,11 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
 
     public Task SendBranchResumeAsync(IEnumerable<Move> moveHistory) =>
         this.SendMessageAsync(new BranchResumeMessage(
+            moveHistory.Select(m => m.ToDto()).ToArray()
+        ));
+
+    public Task SendRematchAsync(IEnumerable<Move> moveHistory) =>
+        this.SendMessageAsync(new RematchMessage(
             moveHistory.Select(m => m.ToDto()).ToArray()
         ));
 
@@ -209,6 +215,9 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
                 case "branchResume":
                     await this.HandleBranchResumeAsync(message);
                     break;
+                case "rematch":
+                    await this.HandleRematchAsync(message);
+                    break;
             }
         }
         catch (JsonException) {
@@ -248,6 +257,14 @@ public class WebRtcService(IJSRuntime jsRuntime) : IAsyncDisposable
     {
         var msg = JsonSerializer.Deserialize<BranchResumeMessage>(message, JsonConfig.Options);
         if (msg is not null && OnBranchResumeReceived is { } handler) {
+            await handler(msg.MoveHistory.Select(Move.FromDto).ToList());
+        }
+    }
+
+    private async Task HandleRematchAsync(string message)
+    {
+        var msg = JsonSerializer.Deserialize<RematchMessage>(message, JsonConfig.Options);
+        if (msg is not null && OnRematchReceived is { } handler) {
             await handler(msg.MoveHistory.Select(Move.FromDto).ToList());
         }
     }

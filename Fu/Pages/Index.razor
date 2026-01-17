@@ -191,6 +191,11 @@
         {
             <button class="btn-small btn-latest" @onclick="GoToLatestAsync">最新に戻る</button>
             <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
+            <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
+        }
+        @if (GameService.State.Status.IsGameOver() && !GameService.State.IsReviewing)
+        {
+            <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
         }
         <MoveTreeView
             MoveTree="GameService.State.MoveTree"

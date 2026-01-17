@@ -589,11 +589,11 @@ public class ShogiGameService
     public async Task GoToLatestAsync()
     {
         if (this.State.IsReviewing) {
+            // 現在表示中のMoveHistory（別のブランチの場合はそのブランチ）の最新に移動
             this.State = this.State with {
-                ViewingMoveIndex = null,
-                IsViewingDifferentBranch = false
+                ViewingMoveIndex = null
+                // IsViewingDifferentBranchは維持（別のブランチを見ている場合はそのまま）
             };
-            this.SyncMoveTreeToCurrentPosition();
             await this.NotifyStateChangedAsync();
         }
     }
@@ -604,6 +604,61 @@ public class ShogiGameService
             await this.BranchFromCurrentPositionAsync();
             await this.NotifyStateChangedAsync();
         }
+    }
+
+    /// <summary>現在の位置から再戦（新しいゲームとして開始、MoveTreeをリセット）</summary>
+    public async Task RematchFromCurrentPositionAsync()
+    {
+        var viewingIndex = this.State.ViewingMoveIndex ?? this.State.MoveHistory.Count;
+        var (board, senteCaptured, goteCaptured, currentPlayer) = this.GetBoardAtMove(viewingIndex);
+        var newHistory = this.State.MoveHistory.Take(viewingIndex).ToImmutableList();
+
+        // MoveTreeを新規作成して棋譜を追加
+        var newMoveTree = new MoveTree();
+        foreach (var move in newHistory) {
+            newMoveTree.AddMove(move);
+        }
+
+        this.State = this.State with {
+            Board = board,
+            SenteCaptured = senteCaptured,
+            GoteCaptured = goteCaptured,
+            CurrentPlayer = currentPlayer,
+            MoveHistory = newHistory,
+            Status = GameStatus.Playing,
+            ViewingMoveIndex = null,
+            IsViewingDifferentBranch = false,
+            MoveTree = newMoveTree
+        };
+
+        await this.NotifyStateChangedAsync();
+    }
+
+    /// <summary>リモートからの再戦を適用</summary>
+    public async Task ApplyRematchAsync(IReadOnlyList<Move> moveHistory)
+    {
+        var localPlayer = this.State.LocalPlayer;
+        var (board, senteCaptured, goteCaptured, currentPlayer) = ReconstructBoard(moveHistory);
+
+        // MoveTreeを新規作成して棋譜を追加
+        var newMoveTree = new MoveTree();
+        foreach (var move in moveHistory) {
+            newMoveTree.AddMove(move);
+        }
+
+        this.State = new GameState(
+            board,
+            currentPlayer,
+            GameStatus.Playing,
+            senteCaptured,
+            goteCaptured,
+            [.. moveHistory],
+            localPlayer,
+            null,
+            false
+        ) { MoveTree = newMoveTree };
+
+        await this.NotifyStateChangedAsync();
     }
 
     public async Task SetViewingMoveIndexAsync(int moveIndex)

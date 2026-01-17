@@ -92,6 +92,7 @@ public partial class Index : IAsyncDisposable
             this.WebRtcService.OnGameStateRequested += this.OnGameStateRequestedAsync;
             this.WebRtcService.OnGameStateSyncReceived += this.OnGameStateSyncReceivedAsync;
             this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
+            this.WebRtcService.OnRematchReceived += this.OnRematchReceivedAsync;
             this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
             this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
 
@@ -277,6 +278,13 @@ public partial class Index : IAsyncDisposable
         await this.WebRtcService.SendBranchResumeAsync(moveHistory);
     }
 
+    private async Task OnRematchReceivedAsync(IReadOnlyList<Move> moveHistory)
+    {
+        // ゲーム状態がPlayingに戻るので評価値表示は自動的にリセットされる
+        await this.GameService.ApplyRematchAsync(moveHistory);
+        await this.InvokeAsync(this.StateHasChanged);
+    }
+
     private async Task InitializeEngineAsync()
     {
         try {
@@ -350,6 +358,15 @@ public partial class Index : IAsyncDisposable
 
     private Task ResumeFromBranchAsync() => this.GameService.ResumeFromBranchAsync();
 
+    private async Task RematchFromCurrentAsync()
+    {
+        // 現在の位置から再戦（ゲーム状態がPlayingに戻るので評価値表示は自動的にリセットされる）
+        await this.GameService.RematchFromCurrentPositionAsync();
+
+        // 相手に再戦を通知
+        await this.WebRtcService.SendRematchAsync(this.GameService.State.MoveHistory);
+    }
+
     private Task OnTreeNodeSelected(MoveNode? node) => this.GameService.GoToNodeAsync(node);
 
     /// <summary>Cross-Origin Isolationが無効な場合、Service Workerを有効にするためにリロードする</summary>
@@ -388,6 +405,7 @@ public partial class Index : IAsyncDisposable
         this.WebRtcService.OnGameStateRequested -= this.OnGameStateRequestedAsync;
         this.WebRtcService.OnGameStateSyncReceived -= this.OnGameStateSyncReceivedAsync;
         this.WebRtcService.OnBranchResumeReceived -= this.OnBranchResumeReceivedAsync;
+        this.WebRtcService.OnRematchReceived -= this.OnRematchReceivedAsync;
         this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
         this.GameService.OnBranchResumedAsync -= this.OnBranchResumedAsync;
         this.EngineService.OnEvaluationUpdated -= this.OnEvaluationUpdatedAsync;
