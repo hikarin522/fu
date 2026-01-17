@@ -14,6 +14,7 @@ public partial class ConnectionPanel : IDisposable
     [Parameter] public string BaseUrl { get; set; } = "";
 
     [Inject] private IJSRuntime JS { get; set; } = null!;
+    [Inject] private NavigationManager Navigation { get; set; } = null!;
 
     private ConnectionState ConnectionState => this.WebRtcService?.State ?? ConnectionState.Disconnected;
 
@@ -112,23 +113,24 @@ public partial class ConnectionPanel : IDisposable
         this.Nickname = this.InputNickname.Trim();
         await this.SaveNicknameAsync(this.Nickname);
         this.RoomId = (await this.WebRtcService.CreateRoomAsync(this.Nickname)).AsPrimitive();
+        this.UpdateUrlWithRoomId(this.RoomId);
     });
 
     private Task JoinRoomWithNickname() => this.ExecuteWithProcessing(async () => {
         this.Nickname = this.InputNickname.Trim();
         await this.SaveNicknameAsync(this.Nickname);
-        await this.WebRtcService.JoinRoomAsync(
-            new RoomId(this.InputRoomId.Trim().ToUpperInvariant()),
-            this.Nickname);
+        var roomId = this.InputRoomId.Trim().ToUpperInvariant();
+        await this.WebRtcService.JoinRoomAsync(new RoomId(roomId), this.Nickname);
+        this.UpdateUrlWithRoomId(roomId);
     });
 
     private Task JoinRoom() => this.ExecuteWithProcessing(async () => {
         if (string.IsNullOrWhiteSpace(this.InputRoomId)) {
             throw new InvalidOperationException("ルームIDを入力してください");
         }
-        await this.WebRtcService.JoinRoomAsync(
-            new RoomId(this.InputRoomId.Trim().ToUpperInvariant()),
-            this.Nickname);
+        var roomId = this.InputRoomId.Trim().ToUpperInvariant();
+        await this.WebRtcService.JoinRoomAsync(new RoomId(roomId), this.Nickname);
+        this.UpdateUrlWithRoomId(roomId);
     });
 
     private async Task ExecuteWithProcessing(Func<Task> action)
@@ -168,6 +170,13 @@ public partial class ConnectionPanel : IDisposable
     private async Task CopyToClipboard(string text)
     {
         await this.JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+
+    private void UpdateUrlWithRoomId(string roomId)
+    {
+        // URLバーを更新（ページリロードなし）
+        var newUrl = $"{this.Navigation.BaseUri}{roomId}";
+        this.Navigation.NavigateTo(newUrl, forceLoad: false, replace: true);
     }
 
     private string GetStatusText() => this.ConnectionState switch {
