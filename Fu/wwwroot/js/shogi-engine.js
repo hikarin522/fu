@@ -110,18 +110,12 @@
     /**
      * エンジンにコマンドを送信
      * @param {string} command - USIコマンド
-     * @param {boolean} [deferred=false] - trueの場合、次のイベントループで実行（デッドロック回避用）
      */
-    function sendCommand(command, deferred = false) {
+    function sendCommand(command) {
         if (!engine) {
             return false;
         }
-        if (deferred) {
-            // 次のイベントループで実行（C#のawaitを即座に完了させる）
-            setTimeout(() => engine.postMessage(command), 0);
-        } else {
-            engine.postMessage(command);
-        }
+        engine.postMessage(command);
         return true;
     }
 
@@ -144,21 +138,11 @@
 
     /**
      * ウォッチドッグタイマーを停止
-     * @param {boolean} [deferred=false] - trueの場合、次のイベントループで実行（デッドロック回避用）
      */
-    function stopWatchdog(deferred = false) {
-        if (deferred) {
-            setTimeout(() => {
-                if (watchdogTimer) {
-                    clearInterval(watchdogTimer);
-                    watchdogTimer = null;
-                }
-            }, 0);
-        } else {
-            if (watchdogTimer) {
-                clearInterval(watchdogTimer);
-                watchdogTimer = null;
-            }
+    function stopWatchdog() {
+        if (watchdogTimer) {
+            clearInterval(watchdogTimer);
+            watchdogTimer = null;
         }
     }
 
