@@ -70,6 +70,7 @@ public class ShogiGameService : IDisposable
             TimeState = timeState
         };
         this.MoveTree = new MoveTree();
+        this._boardCache = null;
         this.StartTurnTimer();
         this.NotifyStateChanged();
     }
@@ -827,6 +828,7 @@ public class ShogiGameService : IDisposable
         if (!preserveMoveTree) {
             this.MoveTree = new MoveTree();
         }
+        this._boardCache = null;
         this.MoveTree.GoToStart();
         foreach (var move in moveHistory) {
             this.MoveTree.AddMove(move);
