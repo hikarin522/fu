@@ -41,13 +41,13 @@ async function initShogiEngine() {
 
         // USI初期化とusiok待機
         await new Promise((resolve) => {
-            let resolved = false;
-            yaneuraou.addMessageListener((line) => {
-                if (!resolved && line === 'usiok') {
-                    resolved = true;
+            const handler = (line) => {
+                if (line === 'usiok') {
+                    yaneuraou.removeMessageListener(handler);
                     resolve();
                 }
-            });
+            };
+            yaneuraou.addMessageListener(handler);
             yaneuraou.postMessage('usi');
         });
 
