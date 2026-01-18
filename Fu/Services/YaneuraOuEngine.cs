@@ -15,7 +15,6 @@ namespace Fu.Services;
 public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
 {
     private readonly IJSRuntime _jsRuntime;
-    private readonly IJSInProcessRuntime? _jsInProcessRuntime;
 
     private DotNetObjectReference<YaneuraOuEngine>? _dotNetRef;
     private TaskCompletionSource? _readyTcs;
@@ -37,7 +36,6 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
     public YaneuraOuEngine(IJSRuntime jsRuntime)
     {
         this._jsRuntime = jsRuntime;
-        this._jsInProcessRuntime = jsRuntime as IJSInProcessRuntime;
     }
 
     private async Task SetupCallbackAsync()
@@ -288,13 +286,13 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
             }
         }
         finally {
-            // ウォッチドッグ停止（同期呼び出しでデッドロック回避）
-            this._jsInProcessRuntime?.InvokeVoid("ShogiEngine.stopWatchdog");
+            // ウォッチドッグ停止（deferred=trueでJS側を次のイベントループに遅延、デッドロック回避）
+            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.stopWatchdog", true);
 
             // キャンセル時はstopを送信（bestmoveを待たない - 次のGoAsync呼び出し時に処理）
             if (this._isAnalyzing && !this._stopRequested) {
                 this._stopRequested = true;
-                this._jsInProcessRuntime?.Invoke<bool>("ShogiEngine.sendCommand", "stop");
+                await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "stop", true);
             }
         }
     }
