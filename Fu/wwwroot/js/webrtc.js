@@ -478,5 +478,19 @@ window.FuStorage = {
             console.warn('Failed to check localStorage:', e);
             return false;
         }
+    },
+    clearByPrefix: function (prefix) {
+        try {
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(prefix)) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+        } catch (e) {
+            console.warn('Failed to clear localStorage by prefix:', e);
+        }
     }
 };
