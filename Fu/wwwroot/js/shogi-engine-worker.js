@@ -10,12 +10,12 @@ async function initEngine() {
     }
 
     try {
-        // YaneuraOuスクリプトをインポート
-        importScripts('lib/yaneuraou/yaneuraou.js');
+        // YaneuraOuスクリプトをインポート（ワーカーはjs/から実行されるので../で親に戻る）
+        importScripts('../lib/yaneuraou/yaneuraou.js');
 
         // WASMモジュールを初期化
         const yaneuraou = await YaneuraOu({
-            locateFile: (path) => `lib/yaneuraou/${path}`
+            locateFile: (path) => `../lib/yaneuraou/${path}`
         });
 
         // メッセージリスナーを設定（全てのメッセージをそのまま転送）
