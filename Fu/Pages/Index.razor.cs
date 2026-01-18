@@ -1,9 +1,12 @@
+using MessagePipe;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
 using R3;
 
+using Fu.Core;
 using Fu.Core.Abstractions;
+using Fu.Core.Events;
 using Fu.Core.Models;
 using Fu.Core.Models.Dto;
 using Fu.Core.Services;
@@ -13,24 +16,62 @@ namespace Fu.Pages;
 
 public partial class Index : IAsyncDisposable
 {
-    private readonly CompositeDisposable _disposables = [];
-    [Inject] private ShogiGameService GameService { get; set; } = null!;
-    [Inject] private WebRtcService WebRtcService { get; set; } = null!;
+    // MessagePipe購読管理
+    private readonly List<IDisposable> _subscriptions = [];
+
+    // R3購読管理（エンジンサービス等）
+    private readonly CompositeDisposable _r3Disposables = [];
+
+    [Inject] private ITransportSender TransportSender { get; set; } = null!;
+    [Inject] private ITransportConnection TransportConnection { get; set; } = null!;
     [Inject] private ShogiEngineService EngineService { get; set; } = null!;
     [Inject] private GameSessionService SessionService { get; set; } = null!;
     [Inject] private UserSettingsService UserSettings { get; set; } = null!;
     [Inject] private LobbyService Lobby { get; set; } = null!;
+    [Inject] private IKifExporter KifExporter { get; set; } = null!;
     [Inject] private IJSRuntime JS { get; set; } = null!;
     [Inject] private NavigationManager Navigation { get; set; } = null!;
 
+    // MessagePipe Subscribers（ゲームイベント）
+    [Inject] private ISubscriber<GameStateChangedEvent> GameStateChangedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<BranchResumedEvent> BranchResumedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<ReviewStartedEvent> ReviewStartedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<ReviewMoveEvent> ReviewMoveSubscriber { get; set; } = null!;
+
+    // MessagePipe Subscribers（トランスポートイベント）
+    [Inject] private ISubscriber<TransportReadyEvent> TransportReadySubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportBecameHostEvent> TransportBecameHostSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportMoveReceivedEvent> TransportMoveReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportGameStartReceivedEvent> TransportGameStartReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportGameStartWithPlayersReceivedEvent> TransportGameStartWithPlayersReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportResignReceivedEvent> TransportResignReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportGameStateSyncReceivedEvent> TransportGameStateSyncReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportBranchResumeReceivedEvent> TransportBranchResumeReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportRematchReceivedEvent> TransportRematchReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportReviewStartReceivedEvent> TransportReviewStartReceivedSubscriber { get; set; } = null!;
+    [Inject] private ISubscriber<TransportReviewMoveReceivedEvent> TransportReviewMoveReceivedSubscriber { get; set; } = null!;
+
     [Parameter] public string? RoomIdParam { get; set; }
+
+    /// <summary>現在の対局スコープ内のゲームサービス（対局中のみ有効）</summary>
+    private ShogiGameService? GameService => this.SessionService.GameService;
+
+    /// <summary>対局スコープがアクティブかどうか</summary>
+    private bool HasActiveGame => this.GameService is not null;
+
+    /// <summary>ゲームサービスを取得（対局中でなければInvalidOperationException）</summary>
+    private ShogiGameService RequireGameService =>
+        this.GameService ?? throw new InvalidOperationException("Game service is not available");
+
+    /// <summary>現在のゲーム状態（対局中でない場合はデフォルト状態を返す）</summary>
+    private GameState CurrentGameState => this.GameService?.State ?? GameState.Default;
 
     // 観戦者・検討中用の盤面反転状態
     private bool SpectatorFlipped { get; set; }
 
     // 対局者は自分が後手なら反転（検討中は手動切り替え）、観戦者は手動切り替え
-    private bool IsFlipped => this.IsPlayer && !this.GameService.State.IsReviewing
-        ? this.GameService.State.LocalTurn == Turn.Second
+    private bool IsFlipped => this.GameService is { } gs && this.IsPlayer && !gs.State.IsReviewing
+        ? gs.State.LocalTurn == Turn.Second
         : this.SpectatorFlipped;
 
     private string? InitError { get; set; }
@@ -71,7 +112,7 @@ public partial class Index : IAsyncDisposable
     // 役割判定（SessionServiceから取得）
     private bool IsPlayer => this.SessionService.IsPlayer;
     private bool IsSpectator => this.SessionService.IsSpectator;
-    private bool IsGameEnded => this.GameService.State.Status.IsGameOver();
+    private bool IsGameEnded => this.GameService?.State.Status.IsGameOver() ?? false;
 
     // 参加者一覧表示用（SessionServiceから取得）
     private string GetParticipantRole(PlayerId playerId) =>
@@ -80,7 +121,7 @@ public partial class Index : IAsyncDisposable
     private int GetParticipantSortOrder(PlayerId playerId) =>
         this.SessionService.Session.GetSortOrder(playerId);
 
-    private IEnumerable<(TransportParticipant Participant, string Role, bool IsConnected, bool IsMe)> GetAllParticipantsInfo()
+    private IEnumerable<(TransportParticipantInfo Participant, string Role, bool IsConnected, bool IsMe)> GetAllParticipantsInfo()
     {
         var connectedPlayerIds = this.Lobby.Participants.Select(p => p.PlayerId).ToHashSet();
         var myPlayerId = this.Lobby.MyPlayerId;
@@ -91,20 +132,21 @@ public partial class Index : IAsyncDisposable
         }
 
         // 切断された対局者を表示（ゲーム中の場合のみ）
-        if (this.GameService.State.Status is not (GameStatus.Playing or GameStatus.Reviewing)) {
+        var status = this.GameService?.State.Status ?? GameStatus.WaitingForConnection;
+        if (status is not (GameStatus.Playing or GameStatus.Reviewing)) {
             yield break;
         }
 
         if (this.FirstPlayerId is { } firstId && !connectedPlayerIds.Contains(firstId)) {
-            yield return (new TransportParticipant(firstId, this.FirstNickname, false), "先手", false, false);
+            yield return (new TransportParticipantInfo(firstId, this.FirstNickname, false), "先手", false, false);
         }
         if (this.SecondPlayerId is { } secondId && !connectedPlayerIds.Contains(secondId)) {
-            yield return (new TransportParticipant(secondId, this.SecondNickname, false), "後手", false, false);
+            yield return (new TransportParticipantInfo(secondId, this.SecondNickname, false), "後手", false, false);
         }
     }
 
     // 評価値表示（観戦者・対局終了後・検討中は常に全表示）
-    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded || this.GameService.State.IsReviewing;
+    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded || (this.GameService?.State.IsReviewing ?? false);
     private bool ShowAdvantage => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
     private bool ShowEvaluationValue => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
     private bool ShowHasMate => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
@@ -113,9 +155,9 @@ public partial class Index : IAsyncDisposable
     private bool ShowCandidateArrows => this.CanShowAllEvaluation;
 
     // 評価表示用の盤面（検討モード時は表示中の盤面）
-    private Board DisplayBoard => this.GameService.State.IsReviewing
-        ? this.GameService.GetBoardAtMove(this.GameService.State.DisplayMoveIndex).board
-        : this.GameService.State.Board;
+    private Board? DisplayBoard => this.GameService is { } gs && gs.State.IsReviewing
+        ? gs.GetBoardAtMove(gs.State.DisplayMoveIndex).board
+        : this.GameService?.State.Board;
 
     // Cross-Origin Isolationのリロードが必要かどうか
     private bool NeedsReload { get; set; }
@@ -157,14 +199,14 @@ public partial class Index : IAsyncDisposable
 
     private void OnTimerTick(object? state)
     {
-        // Dispose済みなら何もしない
-        if (this._disposed) {
+        // Dispose済みまたはゲームサービス未初期化なら何もしない
+        if (this._disposed || this.GameService is not { } gs) {
             return;
         }
 
         // 対局中のみ更新
-        if (this.GameService.State.Status == GameStatus.Playing && !this.GameService.State.IsReviewing) {
-            this._currentTurnElapsed = this.GameService.GetCurrentTurnElapsed();
+        if (gs.State.Status == GameStatus.Playing && !gs.State.IsReviewing) {
+            this._currentTurnElapsed = gs.GetCurrentTurnElapsed();
             _ = this.InvokeAsync(this.StateHasChanged);
         }
     }
@@ -183,11 +225,11 @@ public partial class Index : IAsyncDisposable
 
     private async Task OnRemoteGameStartAsync()
     {
-        await this.GameService.NewGameAsync();
+        await this.RequireGameService.NewGameAsync();
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private async Task OnGameStartWithPlayersAsync(GameStartInfo info)
+    private async Task OnGameStartWithPlayersAsync(TransportGameStartInfo info)
     {
         await this.InvokeAsync(async () => {
             await this.SessionService.ApplyRemoteGameStartAsync(info);
@@ -208,17 +250,18 @@ public partial class Index : IAsyncDisposable
     private async Task OnMoveMade(Move move)
     {
         // 自分の消費時間を取得して送信
-        var elapsedTime = this.GameService.LastMoveElapsedTime;
-        await this.WebRtcService.SendMoveAsync(move, elapsedTime);
+        var elapsedTime = this.RequireGameService.LastMoveElapsedTime;
+        await this.TransportSender.SendMoveAsync(move, elapsedTime);
         this.StateHasChanged();
     }
 
     private async Task OnRemoteMoveReceivedAsync(Move move, TimeSpan elapsedTime)
     {
-        await this.GameService.ApplyRemoteMoveAsync(move, elapsedTime);
+        var gs = this.RequireGameService;
+        await gs.ApplyRemoteMoveAsync(move, elapsedTime);
 
         // 自分の手番になったら通知音を鳴らす
-        if (this.IsPlayer && this.GameService.State.IsMyTurn) {
+        if (this.IsPlayer && gs.State.IsMyTurn) {
             await this.PlayTurnNotificationAsync();
         }
 
@@ -231,21 +274,11 @@ public partial class Index : IAsyncDisposable
     private Task ToggleSoundAsync() =>
         this.UserSettings.ToggleSoundAsync();
 
-    private async Task<GameSessionData?> LoadGameSessionAsync()
-    {
-        try {
-            return await this.JS.InvokeAsync<GameSessionData?>("GameSession.load");
-        }
-        catch {
-            // 読み込み失敗は無視
-            return null;
-        }
-    }
+    private ValueTask<GameSessionInfo?> LoadGameSessionAsync() =>
+        this.SessionService.LoadGameSessionAsync();
 
     private Task ClearGameSessionAsync() =>
         this.SessionService.ClearSessionAsync();
-
-    private sealed record GameSessionData(string RoomId, string Nickname, string? PeerId, long Timestamp);
 
     private async ValueTask OnGameStateChangedAsync()
     {
@@ -263,8 +296,8 @@ public partial class Index : IAsyncDisposable
         var participants = this.Lobby.Participants.ToList();
         if (participants.Count >= 2) {
             // 自分を先手、相手を後手にデフォルト設定
-            var me = participants.FirstOrDefault(p => p.PlayerId == this.Lobby.MyPlayerId);
-            var opponent = participants.FirstOrDefault(p => p.PlayerId != this.Lobby.MyPlayerId);
+            var me = participants.Where(p => p.PlayerId == this.Lobby.MyPlayerId).Select(p => (TransportParticipantInfo?)p).FirstOrDefault();
+            var opponent = participants.Where(p => p.PlayerId != this.Lobby.MyPlayerId).Select(p => (TransportParticipantInfo?)p).FirstOrDefault();
             this.SelectedFirstPlayerId = me?.PlayerId ?? participants[0].PlayerId;
             this.SelectedSecondPlayerId = opponent?.PlayerId ?? participants[1].PlayerId;
         } else {
@@ -287,7 +320,7 @@ public partial class Index : IAsyncDisposable
         var firstParticipant = this.Lobby.Participants.FirstOrDefault(p => p.PlayerId == firstId);
         var secondParticipant = this.Lobby.Participants.FirstOrDefault(p => p.PlayerId == secondId);
 
-        if (firstParticipant is null || secondParticipant is null) {
+        if (firstParticipant.PlayerId == default || secondParticipant.PlayerId == default) {
             return;
         }
 
@@ -328,7 +361,7 @@ public partial class Index : IAsyncDisposable
         await this.SessionService.BroadcastStateAsync();
     }
 
-    private async Task OnGameStateSyncReceivedAsync(GameStateSyncInfo info)
+    private async Task OnGameStateSyncReceivedAsync(TransportGameStateSyncInfo info)
     {
         await this.InvokeAsync(async () => {
             await this.SessionService.ApplyGameStateSyncAsync(info);
@@ -339,10 +372,11 @@ public partial class Index : IAsyncDisposable
 
     private async Task OnBranchResumeReceivedAsync(IReadOnlyList<Move> moveHistory)
     {
-        await this.GameService.ApplyBranchResumeAsync(moveHistory);
+        var gs = this.RequireGameService;
+        await gs.ApplyBranchResumeAsync(moveHistory);
 
         // 自分の手番になったら通知音を鳴らす
-        if (this.IsPlayer && this.GameService.State.IsMyTurn) {
+        if (this.IsPlayer && gs.State.IsMyTurn) {
             await this.PlayTurnNotificationAsync();
         }
 
@@ -352,16 +386,17 @@ public partial class Index : IAsyncDisposable
     private async ValueTask OnBranchResumedAsync(IReadOnlyList<Move> moveHistory)
     {
         // 分岐再開を相手に通知
-        await this.WebRtcService.SendBranchResumeAsync(moveHistory);
+        await this.TransportSender.SendBranchResumeAsync(moveHistory);
     }
 
     private async Task OnRematchReceivedAsync(IReadOnlyList<Move> moveHistory)
     {
         // ゲーム状態がPlayingに戻るので評価値表示は自動的にリセットされる
-        await this.GameService.ApplyRematchAsync(moveHistory);
+        var gs = this.RequireGameService;
+        await gs.ApplyRematchAsync(moveHistory);
 
         // 自分の手番になったら通知音を鳴らす
-        if (this.IsPlayer && this.GameService.State.IsMyTurn) {
+        if (this.IsPlayer && gs.State.IsMyTurn) {
             await this.PlayTurnNotificationAsync();
         }
 
@@ -384,10 +419,11 @@ public partial class Index : IAsyncDisposable
         // 詰みが見つかった場合、詰み手順をブランチとして追加（対局中の対戦者以外）
         if (this.CanShowAllEvaluation &&
             this.EngineService.MateIn is not null &&
-            !string.IsNullOrEmpty(this.EngineService.PrincipalVariation)) {
-            await this.GameService.AddMateSequenceBranchAsync(
+            !string.IsNullOrEmpty(this.EngineService.PrincipalVariation) &&
+            this.GameService is { } gs) {
+            await gs.AddMateSequenceBranchAsync(
                 this.EngineService.PrincipalVariation,
-                this.GameService.State.DisplayMoveIndex);
+                gs.State.DisplayMoveIndex);
         }
 
         await this.InvokeAsync(this.StateHasChanged);
@@ -395,13 +431,13 @@ public partial class Index : IAsyncDisposable
 
     private async Task RequestEvaluationAsync()
     {
-        if (!this.ShowEvaluation || !this.EngineService.IsAvailable) {
+        if (!this.ShowEvaluation || !this.EngineService.IsAvailable || this.GameService is not { } gs) {
             return;
         }
 
-        var state = this.GameService.State;
+        var state = gs.State;
         var (board, firstCaptured, secondCaptured, currentTurn) = state.IsReviewing
-            ? this.GameService.GetBoardAtMove(state.DisplayMoveIndex)
+            ? gs.GetBoardAtMove(state.DisplayMoveIndex)
             : (state.Board, state.FirstCaptured, state.SecondCaptured, state.CurrentTurn);
 
         // 観戦者または対局終了後は候補手を3つ表示
@@ -413,7 +449,7 @@ public partial class Index : IAsyncDisposable
             currentTurn,
             firstCaptured,
             secondCaptured,
-            this.GameService.MoveTree,
+            gs.MoveTree,
             multiPv: multiPv);
     }
 
@@ -425,88 +461,92 @@ public partial class Index : IAsyncDisposable
     private async Task DownloadKifAsync()
     {
         // 選択中のブランチの棋譜をダウンロード
-        var moves = this.GameService.State.DisplayBranchHistory;
-        var kif = KifExporter.Export(
+        var gs = this.RequireGameService;
+        var moves = gs.State.DisplayBranchHistory;
+        var kif = this.KifExporter.Export(
             moves,
-            this.GameService.State.Status,
+            gs.State.Status,
             this.FirstNickname,
             this.SecondNickname,
-            this.GameService.State.Times);
+            gs.State.Times);
         var fileName = $"shogi_{DateTime.Now:yyyyMMdd_HHmmss}.kif";
         await this.JS.InvokeVoidAsync("downloadTextFile", fileName, kif);
     }
 
-    private Task GoBackAsync() => this.GameService.GoBackAsync();
+    private Task GoBackAsync() => this.RequireGameService.GoBackAsync();
 
-    private Task GoForwardAsync() => this.GameService.GoForwardAsync();
+    private Task GoForwardAsync() => this.RequireGameService.GoForwardAsync();
 
-    private Task GoToPreviousBranchAsync() => this.GameService.GoToPreviousBranchAsync();
+    private Task GoToPreviousBranchAsync() => this.RequireGameService.GoToPreviousBranchAsync();
 
-    private Task GoToNextBranchAsync() => this.GameService.GoToNextBranchAsync();
+    private Task GoToNextBranchAsync() => this.RequireGameService.GoToNextBranchAsync();
 
-    private Task GoForwardBranchAsync(int branchIndex) => this.GameService.GoForwardBranchAsync(branchIndex);
+    private Task GoForwardBranchAsync(int branchIndex) => this.RequireGameService.GoForwardBranchAsync(branchIndex);
 
-    private Task GoToLatestAsync() => this.GameService.GoToLatestAsync();
+    private Task GoToLatestAsync() => this.RequireGameService.GoToLatestAsync();
 
-    private Task GoToMoveAsync(int moveIndex) => this.GameService.SetViewingMoveIndexAsync(moveIndex);
+    private Task GoToMoveAsync(int moveIndex) => this.RequireGameService.SetViewingMoveIndexAsync(moveIndex);
 
-    private Task ResumeFromBranchAsync() => this.GameService.ResumeFromBranchAsync();
+    private Task ResumeFromBranchAsync() => this.RequireGameService.ResumeFromBranchAsync();
 
     private async Task RematchFromCurrentAsync()
     {
         // 現在の位置から再戦（ゲーム状態がPlayingに戻るので評価値表示は自動的にリセットされる）
-        await this.GameService.RematchFromCurrentPositionAsync();
+        var gs = this.RequireGameService;
+        await gs.RematchFromCurrentPositionAsync();
 
         // 相手に再戦を通知
-        await this.WebRtcService.SendRematchAsync(this.GameService.State.MoveHistory);
+        await this.TransportSender.SendRematchAsync(gs.State.MoveHistory);
     }
 
-    private Task OnTreeNodeSelected(MoveNode? node) => this.GameService.GoToNodeAsync(node);
+    private Task OnTreeNodeSelected(MoveNode? node) => this.RequireGameService.GoToNodeAsync(node);
 
     // 棋譜ツリーからの検討・再戦
     private async Task OnReviewFromNodeAsync(MoveNode? node)
     {
         // まずそのノードに移動してから検討開始
-        await this.GameService.GoToNodeAsync(node);
-        await this.GameService.StartReviewFromCurrentPositionAsync();
+        var gs = this.RequireGameService;
+        await gs.GoToNodeAsync(node);
+        await gs.StartReviewFromCurrentPositionAsync();
     }
 
     private async Task OnRematchFromNodeAsync(MoveNode? node)
     {
         // まずそのノードに移動してから再戦
-        await this.GameService.GoToNodeAsync(node);
-        await this.GameService.RematchFromCurrentPositionAsync();
-        await this.WebRtcService.SendRematchAsync(this.GameService.State.MoveHistory);
+        var gs = this.RequireGameService;
+        await gs.GoToNodeAsync(node);
+        await gs.RematchFromCurrentPositionAsync();
+        await this.TransportSender.SendRematchAsync(gs.State.MoveHistory);
     }
 
     // 検討モード関連
     private async Task StartReviewFromCurrentAsync()
     {
-        await this.GameService.StartReviewFromCurrentPositionAsync();
+        await this.RequireGameService.StartReviewFromCurrentPositionAsync();
         // 相手に検討モード開始を通知（イベントハンドラで行う）
     }
 
     private async ValueTask OnReviewStartedAsync(IReadOnlyList<Move> moveHistory)
     {
         // 検討モード開始を相手に通知
-        await this.WebRtcService.SendReviewStartAsync(moveHistory);
+        await this.TransportSender.SendReviewStartAsync(moveHistory);
     }
 
     private async ValueTask OnReviewMoveAsync(Move move)
     {
         // 検討モードでの手を相手に通知
-        await this.WebRtcService.SendReviewMoveAsync(move);
+        await this.TransportSender.SendReviewMoveAsync(move);
     }
 
     private async Task OnReviewStartReceivedAsync(IReadOnlyList<Move> moveHistory)
     {
-        await this.GameService.ApplyReviewStartAsync(moveHistory);
+        await this.RequireGameService.ApplyReviewStartAsync(moveHistory);
         await this.InvokeAsync(this.StateHasChanged);
     }
 
     private async Task OnReviewMoveReceivedAsync(Move move)
     {
-        await this.GameService.ApplyReviewMoveAsync(move);
+        await this.RequireGameService.ApplyReviewMoveAsync(move);
         await this.InvokeAsync(this.StateHasChanged);
     }
 
@@ -539,27 +579,22 @@ public partial class Index : IAsyncDisposable
     /// <summary>プレイヤーの累計時間を取得（現在の手番の経過時間を含む）</summary>
     private TimeSpan GetPlayerTime(Turn player)
     {
+        var state = this.RequireGameService.State;
         var totalTime = player == Turn.First
-            ? this.GameService.State.FirstTotalTime
-            : this.GameService.State.SecondTotalTime;
+            ? state.FirstTotalTime
+            : state.SecondTotalTime;
 
         // 対局中で、このプレイヤーが現在の手番なら経過時間を加算
-        if (this.GameService.State.Status == GameStatus.Playing &&
-            !this.GameService.State.IsReviewing &&
-            this.GameService.State.CurrentTurn == player) {
+        if (state.Status == GameStatus.Playing &&
+            !state.IsReviewing &&
+            state.CurrentTurn == player) {
             totalTime += this._currentTurnElapsed;
         }
 
         return totalTime;
     }
 
-    private static string FormatTime(TimeSpan time)
-    {
-        if (time.TotalHours >= 1) {
-            return $"{(int)time.TotalHours}:{time.Minutes:D2}:{time.Seconds:D2}";
-        }
-        return $"{time.Minutes}:{time.Seconds:D2}";
-    }
+    private static string FormatTime(TimeSpan time) => TimeFormatHelper.FormatDisplay(time);
 
     public async ValueTask DisposeAsync()
     {
@@ -571,84 +606,76 @@ public partial class Index : IAsyncDisposable
 
         this.UnsubscribeFromEvents();
         await this.EngineService.DisposeAsync();
-        await this.WebRtcService.DisposeAsync();
+
+        // IGameTransportのDisposeは別途管理
+        if (this.TransportConnection is IAsyncDisposable disposable) {
+            await disposable.DisposeAsync();
+        }
+
         GC.SuppressFinalize(this);
     }
 
     private void SubscribeToEvents()
     {
-        // ゲーム関連イベント（WebRtcService）- R3
-        this.WebRtcService.MoveReceived
-            .SubscribeAwait(async (data, _) => await this.OnRemoteMoveReceivedAsync(data.Move, data.Elapsed))
-            .AddTo(this._disposables);
+        // トランスポートイベント - MessagePipe
+        this._subscriptions.Add(
+            this.TransportReadySubscriber.Subscribe(async _ => await this.OnDataChannelReadyAsync()));
 
-        this.WebRtcService.GameStartReceived
-            .SubscribeAwait(async (_, _) => await this.OnRemoteGameStartAsync())
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportBecameHostSubscriber.Subscribe(_ => Console.WriteLine("Became host")));
 
-        this.WebRtcService.GameStartWithPlayersReceived
-            .SubscribeAwait(async (info, _) => await this.OnGameStartWithPlayersAsync(info))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportMoveReceivedSubscriber.Subscribe(async e => await this.OnRemoteMoveReceivedAsync(e.Move, e.Elapsed)));
 
-        this.WebRtcService.ResignReceived
-            .SubscribeAwait(async (_, _) => await this.OnRemoteResignReceivedAsync())
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportGameStartReceivedSubscriber.Subscribe(async _ => await this.OnRemoteGameStartAsync()));
 
-        this.WebRtcService.GameStateSyncReceived
-            .SubscribeAwait(async (info, _) => await this.OnGameStateSyncReceivedAsync(info))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportGameStartWithPlayersReceivedSubscriber.Subscribe(async e => await this.OnGameStartWithPlayersAsync(e.Info)));
 
-        this.WebRtcService.BranchResumeReceived
-            .SubscribeAwait(async (moves, _) => await this.OnBranchResumeReceivedAsync(moves))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportResignReceivedSubscriber.Subscribe(async _ => await this.OnRemoteResignReceivedAsync()));
 
-        this.WebRtcService.RematchReceived
-            .SubscribeAwait(async (moves, _) => await this.OnRematchReceivedAsync(moves))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportGameStateSyncReceivedSubscriber.Subscribe(async e => await this.OnGameStateSyncReceivedAsync(e.Info)));
 
-        this.WebRtcService.ReviewStartReceived
-            .SubscribeAwait(async (moves, _) => await this.OnReviewStartReceivedAsync(moves))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportBranchResumeReceivedSubscriber.Subscribe(async e => await this.OnBranchResumeReceivedAsync(e.MoveHistory)));
 
-        this.WebRtcService.ReviewMoveReceived
-            .SubscribeAwait(async (move, _) => await this.OnReviewMoveReceivedAsync(move))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportRematchReceivedSubscriber.Subscribe(async e => await this.OnRematchReceivedAsync(e.MoveHistory)));
 
-        // ロビー関連イベント（LobbyService）- R3
-        this.Lobby.Ready
-            .SubscribeAwait(async (_, _) => await this.OnDataChannelReadyAsync())
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportReviewStartReceivedSubscriber.Subscribe(async e => await this.OnReviewStartReceivedAsync(e.MoveHistory)));
 
-        this.Lobby.BecameHost
-            .Subscribe(_ => Console.WriteLine("Became host"))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            this.TransportReviewMoveReceivedSubscriber.Subscribe(async e => await this.OnReviewMoveReceivedAsync(e.Move)));
 
-        // ゲームサービスイベント - R3
-        this.GameService.StateChanged
-            .SubscribeAwait(async (_, _) => await this.OnGameStateChangedAsync())
-            .AddTo(this._disposables);
-
-        this.GameService.BranchResumed
-            .SubscribeAwait(async (moves, _) => await this.OnBranchResumedAsync(moves))
-            .AddTo(this._disposables);
-
-        this.GameService.ReviewStarted
-            .SubscribeAwait(async (moves, _) => await this.OnReviewStartedAsync(moves))
-            .AddTo(this._disposables);
-
-        this.GameService.ReviewMove
-            .SubscribeAwait(async (move, _) => await this.OnReviewMoveAsync(move))
-            .AddTo(this._disposables);
+        // ゲームサービスイベント - MessagePipe
+        this._subscriptions.Add(
+            this.GameStateChangedSubscriber.Subscribe(async _ => await this.OnGameStateChangedAsync()));
+        this._subscriptions.Add(
+            this.BranchResumedSubscriber.Subscribe(async e => await this.OnBranchResumedAsync(e.MoveHistory)));
+        this._subscriptions.Add(
+            this.ReviewStartedSubscriber.Subscribe(async e => await this.OnReviewStartedAsync(e.MoveHistory)));
+        this._subscriptions.Add(
+            this.ReviewMoveSubscriber.Subscribe(async e => await this.OnReviewMoveAsync(e.Move)));
 
         // エンジンサービス - R3
         this.EngineService.EvaluationUpdated
             .SubscribeAwait(async (_, _) => await this.OnEvaluationUpdatedAsync())
-            .AddTo(this._disposables);
+            .AddTo(this._r3Disposables);
     }
 
     private void UnsubscribeFromEvents()
     {
-        // R3 購読は _disposables.Dispose() で解除
-        this._disposables.Dispose();
+        // MessagePipe購読を解除
+        foreach (var subscription in this._subscriptions) {
+            subscription.Dispose();
+        }
+        this._subscriptions.Clear();
+
+        // R3購読を解除
+        this._r3Disposables.Dispose();
     }
 }

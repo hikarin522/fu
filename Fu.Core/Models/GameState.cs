@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 using Fu.Core.Abstractions;
 
 namespace Fu.Core.Models;
@@ -55,51 +53,111 @@ public static class GameStatusExtensions
 }
 
 /// <summary>
-/// 持ち駒を管理する不変レコード
+/// 持ち駒を管理するクラス
 /// </summary>
-public record CapturedPieces(ImmutableDictionary<PieceType, int> Pieces)
+public class CapturedPieces
 {
-    public static readonly CapturedPieces Empty = new(ImmutableDictionary<PieceType, int>.Empty);
+    private readonly Dictionary<PieceType, int> _pieces;
 
-    public int GetCount(PieceType type) => this.Pieces.GetValueOrDefault(type);
+    public CapturedPieces() => this._pieces = [];
 
-    /// <summary>駒を追加（成駒は元の駒として追加）して新しいインスタンスを返す</summary>
-    public CapturedPieces Add(PieceType type)
+    public CapturedPieces(IEnumerable<KeyValuePair<PieceType, int>> pieces) =>
+        this._pieces = new Dictionary<PieceType, int>(pieces);
+
+    public static CapturedPieces Empty => new();
+
+    public int GetCount(PieceType type) => this._pieces.GetValueOrDefault(type);
+
+    /// <summary>駒を追加（成駒は元の駒として追加）</summary>
+    public void Add(PieceType type)
     {
         var baseType = type.GetUnpromotedType();
-        var newCount = this.Pieces.GetValueOrDefault(baseType) + 1;
-        return this with { Pieces = this.Pieces.SetItem(baseType, newCount) };
+        this._pieces[baseType] = this._pieces.GetValueOrDefault(baseType) + 1;
     }
 
-    /// <summary>駒を削除して新しいインスタンスを返す（失敗時はnull）</summary>
-    public CapturedPieces? TryRemove(PieceType type)
+    /// <summary>駒を削除（失敗時はfalse）</summary>
+    public bool TryRemove(PieceType type)
     {
-        if (this.Pieces.TryGetValue(type, out var count) && count > 0) {
-            return this with { Pieces = this.Pieces.SetItem(type, count - 1) };
+        if (this._pieces.TryGetValue(type, out var count) && count > 0) {
+            this._pieces[type] = count - 1;
+            return true;
         }
-        return null;
+        return false;
     }
 
     public IEnumerable<(PieceType type, int count)> GetAll() =>
-        this.Pieces.Where(x => x.Value > 0).Select(x => (x.Key, x.Value));
+        this._pieces.Where(x => x.Value > 0).Select(x => (x.Key, x.Value));
+
+    /// <summary>クローンを作成</summary>
+    public CapturedPieces Clone() => new(this._pieces);
+
+    /// <summary>内容をリセット</summary>
+    public void Clear() => this._pieces.Clear();
+
+    /// <summary>別のCapturedPiecesからコピー</summary>
+    public void CopyFrom(CapturedPieces other)
+    {
+        this._pieces.Clear();
+        foreach (var kvp in other._pieces) {
+            this._pieces[kvp.Key] = kvp.Value;
+        }
+    }
 }
 
 /// <summary>
-/// 対局の状態を表す不変レコード
+/// 対局の状態を表すクラス（mutable）
 /// </summary>
-public record GameState(
-    Board Board,
-    Turn CurrentTurn,
-    GameStatus Status,
-    CapturedPieces FirstCaptured,
-    CapturedPieces SecondCaptured,
-    ImmutableList<Move> MoveHistory,
-    Turn LocalTurn,
-    int? ViewingMoveIndex = null,
-    ImmutableList<Move>? ViewingBranchHistory = null,
-    ImmutableList<TimeSpan>? MoveTimes = null,
-    GameTimeState? TimeState = null)
+public class GameState
 {
+    public Board Board { get; set; }
+    public Turn CurrentTurn { get; set; }
+    public GameStatus Status { get; set; }
+    public CapturedPieces FirstCaptured { get; set; }
+    public CapturedPieces SecondCaptured { get; set; }
+    public List<Move> MoveHistory { get; set; }
+    public Turn LocalTurn { get; set; }
+    public int? ViewingMoveIndex { get; set; }
+    public List<Move>? ViewingBranchHistory { get; set; }
+    public List<TimeSpan>? MoveTimes { get; set; }
+    public GameTimeState? TimeState { get; set; }
+
+    public GameState()
+    {
+        this.Board = new Board();
+        this.CurrentTurn = Turn.First;
+        this.Status = GameStatus.WaitingForConnection;
+        this.FirstCaptured = CapturedPieces.Empty;
+        this.SecondCaptured = CapturedPieces.Empty;
+        this.MoveHistory = [];
+        this.LocalTurn = Turn.None;
+    }
+
+    public GameState(
+        Board board,
+        Turn currentTurn,
+        GameStatus status,
+        CapturedPieces firstCaptured,
+        CapturedPieces secondCaptured,
+        IReadOnlyList<Move> moveHistory,
+        Turn localTurn,
+        int? viewingMoveIndex = null,
+        IReadOnlyList<Move>? viewingBranchHistory = null,
+        IReadOnlyList<TimeSpan>? moveTimes = null,
+        GameTimeState? timeState = null)
+    {
+        this.Board = board;
+        this.CurrentTurn = currentTurn;
+        this.Status = status;
+        this.FirstCaptured = firstCaptured;
+        this.SecondCaptured = secondCaptured;
+        this.MoveHistory = [.. moveHistory];
+        this.LocalTurn = localTurn;
+        this.ViewingMoveIndex = viewingMoveIndex;
+        this.ViewingBranchHistory = viewingBranchHistory is not null ? [.. viewingBranchHistory] : null;
+        this.MoveTimes = moveTimes is not null ? [.. moveTimes] : null;
+        this.TimeState = timeState;
+    }
+
     /// <summary>各手の消費時間リスト</summary>
     public IReadOnlyList<TimeSpan> Times => this.MoveTimes ?? [];
 
@@ -110,18 +168,22 @@ public record GameState(
     public bool HasTimeControl => this.TimeState is not null &&
                                    this.TimeState.Settings.Type != TimeControlType.None;
 
-    public static GameState Initial => new(
-        new Board(),
-        Turn.First,
-        GameStatus.WaitingForConnection,
-        CapturedPieces.Empty,
-        CapturedPieces.Empty,
-        [],
-        Turn.None
-    );
+    public static GameState Initial => new();
+
+    /// <summary>デフォルト状態（対局が開始されていない状態）</summary>
+    public static GameState Default => Initial;
 
     public CapturedPieces GetCapturedPieces(Turn turn) =>
         turn == Turn.First ? this.FirstCaptured : this.SecondCaptured;
+
+    public void SetCapturedPieces(Turn turn, CapturedPieces captured)
+    {
+        if (turn == Turn.First) {
+            this.FirstCaptured = captured;
+        } else {
+            this.SecondCaptured = captured;
+        }
+    }
 
     /// <summary>自分の手番かどうか</summary>
     public bool IsMyTurn => this.LocalTurn == this.CurrentTurn;
@@ -144,15 +206,8 @@ public record GameState(
     /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
     public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.DisplayBranchHistory.Count;
 
-    /// <summary>手番を交代した新しい状態を返す</summary>
-    public GameState SwitchTurn() =>
-        this with { CurrentTurn = this.CurrentTurn.GetOpponent() };
-
-    /// <summary>持ち駒を更新した新しい状態を返す</summary>
-    public GameState WithCapturedPieces(Turn turn, CapturedPieces captured) =>
-        turn == Turn.First
-            ? this with { FirstCaptured = captured }
-            : this with { SecondCaptured = captured };
+    /// <summary>手番を交代</summary>
+    public void SwitchTurn() => this.CurrentTurn = this.CurrentTurn.GetOpponent();
 
     /// <summary>先手の累計消費時間</summary>
     public TimeSpan FirstTotalTime => this.Times
@@ -163,4 +218,20 @@ public record GameState(
     public TimeSpan SecondTotalTime => this.Times
         .Where((_, i) => i % 2 == 1)  // 1, 3, 5, ... は後手
         .Aggregate(TimeSpan.Zero, (sum, t) => sum + t);
+
+    /// <summary>初期状態にリセット</summary>
+    public void Reset()
+    {
+        this.Board = new Board();
+        this.CurrentTurn = Turn.First;
+        this.Status = GameStatus.WaitingForConnection;
+        this.FirstCaptured = CapturedPieces.Empty;
+        this.SecondCaptured = CapturedPieces.Empty;
+        this.MoveHistory.Clear();
+        this.LocalTurn = Turn.None;
+        this.ViewingMoveIndex = null;
+        this.ViewingBranchHistory = null;
+        this.MoveTimes = null;
+        this.TimeState = null;
+    }
 }

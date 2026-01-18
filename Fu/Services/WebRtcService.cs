@@ -1,10 +1,10 @@
 using System.Text.Json;
 
+using MessagePipe;
 using Microsoft.JSInterop;
 
-using R3;
-
 using Fu.Core.Abstractions;
+using Fu.Core.Events;
 using Fu.Core.Models;
 using Fu.Core.Models.Dto;
 
@@ -19,39 +19,76 @@ internal static class JsonConfig
 }
 
 /// <summary>
-/// WebRTC経由のゲーム通信サービス
+/// WebRTC (Trystero) 経由のゲーム通信サービス
 /// </summary>
-public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
+public class WebRtcService : IGameTransport
 {
+    private readonly IJSRuntime _jsRuntime;
     private DotNetObjectReference<WebRtcService>? _dotNetRef;
     private bool _dataChannelOpen;
-    private readonly Dictionary<PlayerId, TransportParticipant> _participants = [];
+    private readonly Dictionary<PlayerId, TransportParticipantInfo> _participants = [];
     private Dictionary<string, Action<string>>? _messageHandlers;
 
-    // R3 Subjects
-    private readonly Subject<TransportConnectionState> _connectionStateChanged = new();
-    private readonly Subject<Unit> _ready = new();
-    private readonly Subject<TransportParticipant> _participantJoined = new();
-    private readonly Subject<PlayerId> _participantLeft = new();
-    private readonly Subject<Unit> _becameHost = new();
-    private readonly Subject<(Move Move, TimeSpan Elapsed)> _moveReceived = new();
-    private readonly Subject<Unit> _gameStartReceived = new();
-    private readonly Subject<GameStartInfo> _gameStartWithPlayersReceived = new();
-    private readonly Subject<Unit> _resignReceived = new();
-    private readonly Subject<Unit> _gameStateRequested = new();
-    private readonly Subject<GameStateSyncInfo> _gameStateSyncReceived = new();
-    private readonly Subject<IReadOnlyList<Move>> _branchResumeReceived = new();
-    private readonly Subject<IReadOnlyList<Move>> _rematchReceived = new();
-    private readonly Subject<IReadOnlyList<Move>> _reviewStartReceived = new();
-    private readonly Subject<Move> _reviewMoveReceived = new();
+    // MessagePipe Publishers
+    private readonly IPublisher<TransportConnectionStateChangedEvent> _connectionStateChanged;
+    private readonly IPublisher<TransportReadyEvent> _ready;
+    private readonly IPublisher<TransportParticipantJoinedEvent> _participantJoined;
+    private readonly IPublisher<TransportParticipantLeftEvent> _participantLeft;
+    private readonly IPublisher<TransportBecameHostEvent> _becameHost;
+    private readonly IPublisher<TransportMoveReceivedEvent> _moveReceived;
+    private readonly IPublisher<TransportGameStartReceivedEvent> _gameStartReceived;
+    private readonly IPublisher<TransportGameStartWithPlayersReceivedEvent> _gameStartWithPlayersReceived;
+    private readonly IPublisher<TransportResignReceivedEvent> _resignReceived;
+    private readonly IPublisher<TransportGameStateRequestedEvent> _gameStateRequested;
+    private readonly IPublisher<TransportGameStateSyncReceivedEvent> _gameStateSyncReceived;
+    private readonly IPublisher<TransportBranchResumeReceivedEvent> _branchResumeReceived;
+    private readonly IPublisher<TransportRematchReceivedEvent> _rematchReceived;
+    private readonly IPublisher<TransportReviewStartReceivedEvent> _reviewStartReceived;
+    private readonly IPublisher<TransportReviewMoveReceivedEvent> _reviewMoveReceived;
+
+    public WebRtcService(
+        IJSRuntime jsRuntime,
+        IPublisher<TransportConnectionStateChangedEvent> connectionStateChanged,
+        IPublisher<TransportReadyEvent> ready,
+        IPublisher<TransportParticipantJoinedEvent> participantJoined,
+        IPublisher<TransportParticipantLeftEvent> participantLeft,
+        IPublisher<TransportBecameHostEvent> becameHost,
+        IPublisher<TransportMoveReceivedEvent> moveReceived,
+        IPublisher<TransportGameStartReceivedEvent> gameStartReceived,
+        IPublisher<TransportGameStartWithPlayersReceivedEvent> gameStartWithPlayersReceived,
+        IPublisher<TransportResignReceivedEvent> resignReceived,
+        IPublisher<TransportGameStateRequestedEvent> gameStateRequested,
+        IPublisher<TransportGameStateSyncReceivedEvent> gameStateSyncReceived,
+        IPublisher<TransportBranchResumeReceivedEvent> branchResumeReceived,
+        IPublisher<TransportRematchReceivedEvent> rematchReceived,
+        IPublisher<TransportReviewStartReceivedEvent> reviewStartReceived,
+        IPublisher<TransportReviewMoveReceivedEvent> reviewMoveReceived)
+    {
+        this._jsRuntime = jsRuntime;
+        this._connectionStateChanged = connectionStateChanged;
+        this._ready = ready;
+        this._participantJoined = participantJoined;
+        this._participantLeft = participantLeft;
+        this._becameHost = becameHost;
+        this._moveReceived = moveReceived;
+        this._gameStartReceived = gameStartReceived;
+        this._gameStartWithPlayersReceived = gameStartWithPlayersReceived;
+        this._resignReceived = resignReceived;
+        this._gameStateRequested = gameStateRequested;
+        this._gameStateSyncReceived = gameStateSyncReceived;
+        this._branchResumeReceived = branchResumeReceived;
+        this._rematchReceived = rematchReceived;
+        this._reviewStartReceived = reviewStartReceived;
+        this._reviewMoveReceived = reviewMoveReceived;
+    }
 
     /// <summary>メッセージタイプとハンドラのマッピングを取得</summary>
     private Dictionary<string, Action<string>> MessageHandlers => this._messageHandlers ??= new() {
         ["move"] = this.HandleMoveMessage,
-        ["gameStart"] = _ => this._gameStartReceived.OnNext(Unit.Default),
+        ["gameStart"] = _ => this._gameStartReceived.Publish(new TransportGameStartReceivedEvent()),
         ["gameStartWithPlayers"] = this.HandleGameStartWithPlayersMessage,
-        ["resign"] = _ => this._resignReceived.OnNext(Unit.Default),
-        ["gameStateRequest"] = _ => this._gameStateRequested.OnNext(Unit.Default),
+        ["resign"] = _ => this._resignReceived.Publish(new TransportResignReceivedEvent()),
+        ["gameStateRequest"] = _ => this._gameStateRequested.Publish(new TransportGameStateRequestedEvent()),
         ["gameStateSync"] = this.HandleGameStateSyncMessage,
         ["branchResume"] = this.HandleBranchResumeMessage,
         ["rematch"] = this.HandleRematchMessage,
@@ -65,27 +102,10 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     public PlayerId? MyPlayerId { get; private set; }
     public string? MyNickname { get; private set; }
     public RoomId? RoomId { get; private set; }
-    public IReadOnlyCollection<TransportParticipant> Participants => this._participants.Values;
+    public IReadOnlyCollection<TransportParticipantInfo> Participants => this._participants.Values;
 
-    #region Observable
-
-    public Observable<TransportConnectionState> ConnectionStateChanged => this._connectionStateChanged;
-    public Observable<Unit> Ready => this._ready;
-    public Observable<TransportParticipant> ParticipantJoined => this._participantJoined;
-    public Observable<PlayerId> ParticipantLeft => this._participantLeft;
-    public Observable<Unit> BecameHost => this._becameHost;
-    public Observable<(Move Move, TimeSpan Elapsed)> MoveReceived => this._moveReceived;
-    public Observable<Unit> GameStartReceived => this._gameStartReceived;
-    public Observable<GameStartInfo> GameStartWithPlayersReceived => this._gameStartWithPlayersReceived;
-    public Observable<Unit> ResignReceived => this._resignReceived;
-    public Observable<Unit> GameStateRequested => this._gameStateRequested;
-    public Observable<GameStateSyncInfo> GameStateSyncReceived => this._gameStateSyncReceived;
-    public Observable<IReadOnlyList<Move>> BranchResumeReceived => this._branchResumeReceived;
-    public Observable<IReadOnlyList<Move>> RematchReceived => this._rematchReceived;
-    public Observable<IReadOnlyList<Move>> ReviewStartReceived => this._reviewStartReceived;
-    public Observable<Move> ReviewMoveReceived => this._reviewMoveReceived;
-
-    #endregion
+    public TransportParticipantInfo? GetParticipant(PlayerId playerId) =>
+        this._participants.GetValueOrDefault(playerId);
 
     #region 接続管理
 
@@ -94,30 +114,31 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
         // 二重初期化時のリーク防止
         this._dotNetRef?.Dispose();
         this._dotNetRef = DotNetObjectReference.Create(this);
-        await jsRuntime.InvokeVoidAsync("WebRtc.initialize", this._dotNetRef);
+        await this._jsRuntime.InvokeVoidAsync("WebRtc.initialize", this._dotNetRef);
     }
 
-    public async Task<RoomId> CreateRoomAsync(string nickname, string? savedPlayerId = null)
+    public async Task<RoomId> CreateRoomAsync(string nickname, PlayerId? savedPlayerId = null)
     {
         this.IsHost = true;
         this.MyNickname = nickname;
-        this.RoomId = await jsRuntime.InvokeAsync<RoomId>("WebRtc.createRoom", nickname, savedPlayerId);
-        this.MyPlayerId = await jsRuntime.InvokeAsync<PlayerId>("WebRtc.getMyPeerId");
+        this.RoomId = Core.Models.RoomId.Generate();
+        this.MyPlayerId = savedPlayerId ?? PlayerId.Generate(nickname);
+        await this._jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", this.RoomId.Value.AsPrimitive(), this.MyPlayerId.Value.AsPrimitive(), nickname, true);
         return this.RoomId.Value;
     }
 
-    public async Task JoinRoomAsync(RoomId roomId, string nickname, string? savedPlayerId = null)
+    public async Task JoinRoomAsync(RoomId roomId, string nickname, PlayerId? savedPlayerId = null)
     {
         this.IsHost = false;
         this.MyNickname = nickname;
         this.RoomId = roomId;
-        await jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId, nickname, savedPlayerId);
-        this.MyPlayerId = await jsRuntime.InvokeAsync<PlayerId>("WebRtc.getMyPeerId");
+        this.MyPlayerId = savedPlayerId ?? PlayerId.Generate(nickname);
+        await this._jsRuntime.InvokeVoidAsync("WebRtc.joinRoom", roomId.AsPrimitive(), this.MyPlayerId.Value.AsPrimitive(), nickname, false);
     }
 
     public async Task DisconnectAsync()
     {
-        await jsRuntime.InvokeVoidAsync("WebRtc.disconnect");
+        await this._jsRuntime.InvokeVoidAsync("WebRtc.disconnect");
         this._participants.Clear();
         this.IsHost = false;
         this.MyPlayerId = null;
@@ -185,7 +206,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     private async Task SendMessageAsync<T>(T message) where T : GameMessage
     {
         var json = JsonSerializer.Serialize(message, JsonConfig.Options);
-        await jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
+        await this._jsRuntime.InvokeVoidAsync("WebRtc.sendMessage", json);
     }
 
     #endregion
@@ -196,7 +217,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         if (this.ConnectionState != newState) {
             this.ConnectionState = newState;
-            this._connectionStateChanged.OnNext(this.ConnectionState);
+            this._connectionStateChanged.Publish(new TransportConnectionStateChangedEvent(this.ConnectionState));
         }
     }
 
@@ -221,7 +242,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         this._dataChannelOpen = true;
         this.SetState(TransportConnectionState.Connected);
-        this._ready.OnNext(Unit.Default);
+        this._ready.Publish(new TransportReadyEvent());
         return Task.CompletedTask;
     }
 
@@ -237,26 +258,50 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     public Task OnParticipantJoinedCallback(string peerId, string nickname, bool isHost)
     {
         var playerId = new PlayerId(peerId);
-        var participant = new TransportParticipant(playerId, nickname, isHost);
+        var participant = new TransportParticipantInfo(playerId, nickname, isHost);
         this._participants[playerId] = participant;
-        this._participantJoined.OnNext(participant);
+        this._participantJoined.Publish(new TransportParticipantJoinedEvent(participant));
         return Task.CompletedTask;
     }
 
     [JSInvokable]
-    public Task OnParticipantLeftCallback(string peerId)
+    public async Task OnParticipantLeftCallback(string peerId, bool wasHost)
     {
         var playerId = new PlayerId(peerId);
         this._participants.Remove(playerId);
-        this._participantLeft.OnNext(playerId);
-        return Task.CompletedTask;
+        this._participantLeft.Publish(new TransportParticipantLeftEvent(playerId));
+
+        // ホストが退出した場合、C#側でホスト選出
+        if (wasHost && !this.IsHost && this._participants.Count > 0) {
+            var shouldBecomeHost = this.ElectNewHost();
+            if (shouldBecomeHost) {
+                this.IsHost = true;
+                this._becameHost.Publish(new TransportBecameHostEvent());
+                // JS側にホスト昇格を通知（他のピアへの通知用）
+                await this._jsRuntime.InvokeVoidAsync("WebRtc.notifyBecameHost");
+            }
+        }
+    }
+
+    /// <summary>自分が新しいホストに選出されるべきか判定</summary>
+    private bool ElectNewHost()
+    {
+        // PeerIDの辞書順で最小のピアがホストになる
+        var sortedPlayerIds = this._participants.Keys
+            .Select(p => p.AsPrimitive())
+            .Order()
+            .ToList();
+
+        return sortedPlayerIds.Count > 0 && sortedPlayerIds[0] == this.MyPlayerId?.AsPrimitive();
     }
 
     [JSInvokable]
+    [Obsolete("Use OnParticipantLeftCallback(peerId, wasHost) instead")]
     public Task OnBecameHostCallback()
     {
+        // JS側からの直接呼び出し用（後方互換）
         this.IsHost = true;
-        this._becameHost.OnNext(Unit.Default);
+        this._becameHost.Publish(new TransportBecameHostEvent());
         return Task.CompletedTask;
     }
 
@@ -295,7 +340,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
         var msg = JsonSerializer.Deserialize<MoveMessage>(message, JsonConfig.Options);
         if (msg is not null) {
             var elapsedTime = TimeSpan.FromSeconds(msg.ElapsedSeconds);
-            this._moveReceived.OnNext((Move.FromDto(msg.Move), elapsedTime));
+            this._moveReceived.Publish(new TransportMoveReceivedEvent(Move.FromDto(msg.Move), elapsedTime));
         }
     }
 
@@ -303,9 +348,10 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         var msg = JsonSerializer.Deserialize<GameStartWithPlayersMessage>(message, JsonConfig.Options);
         if (msg is not null) {
-            var senteNickname = this._participants.GetValueOrDefault(msg.SentePlayerId)?.Nickname ?? "先手";
-            var goteNickname = this._participants.GetValueOrDefault(msg.GotePlayerId)?.Nickname ?? "後手";
-            this._gameStartWithPlayersReceived.OnNext(new GameStartInfo(msg.SentePlayerId, msg.GotePlayerId, senteNickname, goteNickname, msg.EvaluationOptions));
+            var senteNickname = this._participants.GetValueOrDefault(msg.SentePlayerId).Nickname ?? "先手";
+            var goteNickname = this._participants.GetValueOrDefault(msg.GotePlayerId).Nickname ?? "後手";
+            var info = new TransportGameStartInfo(msg.SentePlayerId, msg.GotePlayerId, senteNickname, goteNickname, msg.EvaluationOptions);
+            this._gameStartWithPlayersReceived.Publish(new TransportGameStartWithPlayersReceivedEvent(info));
         }
     }
 
@@ -316,7 +362,8 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
             var moves = msg.MoveHistory.Select(Move.FromDto).ToList();
             var status = Enum.TryParse<GameStatus>(msg.Status, out var s) ? s : GameStatus.WaitingForConnection;
             var moveTimes = msg.MoveTimes?.Select(t => TimeSpan.FromSeconds(t)).ToList();
-            this._gameStateSyncReceived.OnNext(new GameStateSyncInfo(moves, msg.SentePlayerId, msg.GotePlayerId, msg.SenteNickname, msg.GoteNickname, status, msg.EvaluationOptions, moveTimes));
+            var info = new TransportGameStateSyncInfo(moves, msg.SentePlayerId, msg.GotePlayerId, msg.SenteNickname, msg.GoteNickname, status, msg.EvaluationOptions, moveTimes);
+            this._gameStateSyncReceived.Publish(new TransportGameStateSyncReceivedEvent(info));
         }
     }
 
@@ -324,7 +371,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         var msg = JsonSerializer.Deserialize<BranchResumeMessage>(message, JsonConfig.Options);
         if (msg is not null) {
-            this._branchResumeReceived.OnNext(msg.MoveHistory.Select(Move.FromDto).ToList());
+            this._branchResumeReceived.Publish(new TransportBranchResumeReceivedEvent(msg.MoveHistory.Select(Move.FromDto).ToList()));
         }
     }
 
@@ -332,7 +379,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         var msg = JsonSerializer.Deserialize<RematchMessage>(message, JsonConfig.Options);
         if (msg is not null) {
-            this._rematchReceived.OnNext(msg.MoveHistory.Select(Move.FromDto).ToList());
+            this._rematchReceived.Publish(new TransportRematchReceivedEvent(msg.MoveHistory.Select(Move.FromDto).ToList()));
         }
     }
 
@@ -340,7 +387,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         var msg = JsonSerializer.Deserialize<ReviewStartMessage>(message, JsonConfig.Options);
         if (msg is not null) {
-            this._reviewStartReceived.OnNext(msg.MoveHistory.Select(Move.FromDto).ToList());
+            this._reviewStartReceived.Publish(new TransportReviewStartReceivedEvent(msg.MoveHistory.Select(Move.FromDto).ToList()));
         }
     }
 
@@ -348,7 +395,7 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         var msg = JsonSerializer.Deserialize<ReviewMoveMessage>(message, JsonConfig.Options);
         if (msg is not null) {
-            this._reviewMoveReceived.OnNext(Move.FromDto(msg.Move));
+            this._reviewMoveReceived.Publish(new TransportReviewMoveReceivedEvent(Move.FromDto(msg.Move)));
         }
     }
 
@@ -358,24 +405,6 @@ public class WebRtcService(IJSRuntime jsRuntime) : IGameTransport
     {
         await this.DisconnectAsync();
         this._dotNetRef?.Dispose();
-
-        // Dispose all subjects
-        this._connectionStateChanged.Dispose();
-        this._ready.Dispose();
-        this._participantJoined.Dispose();
-        this._participantLeft.Dispose();
-        this._becameHost.Dispose();
-        this._moveReceived.Dispose();
-        this._gameStartReceived.Dispose();
-        this._gameStartWithPlayersReceived.Dispose();
-        this._resignReceived.Dispose();
-        this._gameStateRequested.Dispose();
-        this._gameStateSyncReceived.Dispose();
-        this._branchResumeReceived.Dispose();
-        this._rematchReceived.Dispose();
-        this._reviewStartReceived.Dispose();
-        this._reviewMoveReceived.Dispose();
-
         GC.SuppressFinalize(this);
     }
 }

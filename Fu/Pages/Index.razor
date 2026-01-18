@@ -5,20 +5,20 @@
     <header class="game-header">
         <h1>Fu - 将棋</h1>
         <div class="game-info">
-            @switch (GameService.State.Status)
+            @switch (CurrentGameState.Status)
             {
                 case GameStatus.Playing:
-                    <span class="turn-indicator @(GameService.State.IsMyTurn ? "my-turn" : "opponent-turn")">
-                        @(GameService.State.IsMyTurn ? "あなたの番です" : "相手の番です")
+                    <span class="turn-indicator @(CurrentGameState.IsMyTurn ? "my-turn" : "opponent-turn")">
+                        @(CurrentGameState.IsMyTurn ? "あなたの番です" : "相手の番です")
                     </span>
-                    @if (GameService.IsInCheck())
+                    @if (GameService?.IsInCheck() ?? false)
                     {
                         <span class="check-indicator">王手!</span>
                     }
                     break;
                 case GameStatus.Reviewing:
                     <span class="turn-indicator review-mode">
-                        検討中 - @(GameService.State.CurrentTurn == Turn.First ? "先手" : "後手")番
+                        検討中 - @(CurrentGameState.CurrentTurn == Turn.First ? "先手" : "後手")番
                     </span>
                     break;
                 case var status when status.GetResultMessage() is { } message:
@@ -121,12 +121,12 @@
                 </div>
 
                 <ShogiBoard
-                    State="GameService.State"
+                    State="CurrentGameState"
                     GameService="GameService"
                     OnMoveMade="OnMoveMade"
                     IsFlipped="IsFlipped"
                     CandidateMoves="@(ShowCandidateArrows ? EngineService.Candidates : null)"
-                    CandidateMoveTurn="GameService.State.CurrentTurn" />
+                    CandidateMoveTurn="CurrentGameState.CurrentTurn" />
 
                 <div class="player-info self">
                     <span class="player-label">
@@ -142,14 +142,14 @@
                     </span>
                 </div>
 
-                @if (IsSpectator || IsGameEnded || GameService.State.IsReviewing)
+                @if (IsSpectator || IsGameEnded || CurrentGameState.IsReviewing)
                 {
                     <div class="spectator-controls">
                         @if (IsSpectator)
                         {
                             <span class="spectator-notice">観戦中</span>
                         }
-                        else if (GameService.State.IsReviewing)
+                        else if (CurrentGameState.IsReviewing)
                         {
                             <span class="spectator-notice">検討中</span>
                         }
@@ -186,11 +186,11 @@
                 }
 
                 <div class="game-controls">
-                    @if (GameService.State.Status == GameStatus.Playing && IsPlayer)
+                    @if (CurrentGameState.Status == GameStatus.Playing && IsPlayer)
                     {
                         <button class="btn danger" @onclick="ResignAsync">投了</button>
                     }
-                    @if (GameService.State.Status != GameStatus.Playing)
+                    @if (CurrentGameState.Status != GameStatus.Playing)
                     {
                         <button class="btn" @onclick="OpenNewGameDialog">新規対局</button>
                     }
@@ -202,12 +202,12 @@
         }
     </main>
 
-    @if (Lobby.IsConnected && !ShowNewGameDialog && GameService.State.Status != GameStatus.WaitingForConnection)
+    @if (Lobby.IsConnected && !ShowNewGameDialog && CurrentGameState.Status != GameStatus.WaitingForConnection && GameService is not null)
     {
     <div class="move-history">
         <div class="move-history-header">
             <h4>棋譜</h4>
-            @if (GameService.State.MoveHistory.Count > 0)
+            @if (CurrentGameState.MoveHistory.Count > 0)
             {
                 <button class="btn-small" @onclick="DownloadKifAsync">保存</button>
             }
@@ -223,10 +223,10 @@
         </div>
         @* 検討ボタン群 *@
         @{
-            var isReviewing = GameService.State.IsReviewing;
-            var isGameOver = GameService.State.Status.IsGameOver();
-            var isReviewMode = GameService.State.Status == GameStatus.Reviewing;
-            var canResumeFromBranch = GameService.State.Status == GameStatus.Playing && !GameService.State.IsAtActiveBranchLatest;
+            var isReviewing = CurrentGameState.IsReviewing;
+            var isGameOver = CurrentGameState.Status.IsGameOver();
+            var isReviewMode = CurrentGameState.Status == GameStatus.Reviewing;
+            var canResumeFromBranch = CurrentGameState.Status == GameStatus.Playing && !CurrentGameState.IsAtActiveBranchLatest;
         }
         @if (isReviewing || isReviewMode)
         {
@@ -236,15 +236,15 @@
         {
             <button class="btn-small btn-branch" @onclick="ResumeFromBranchAsync">ここから再開</button>
         }
-        @if (isGameOver || GameService.State.IsReviewing)
+        @if (isGameOver || CurrentGameState.IsReviewing)
         {
             <button class="btn-small btn-rematch" @onclick="RematchFromCurrentAsync">ここから再戦</button>
             <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>
         }
         <MoveTreeView
             MoveTree="GameService.MoveTree"
-            MoveHistory="GameService.State.DisplayBranchHistory"
-            DisplayMoveIndex="GameService.State.DisplayMoveIndex"
+            MoveHistory="CurrentGameState.DisplayBranchHistory"
+            DisplayMoveIndex="CurrentGameState.DisplayMoveIndex"
             OnNodeSelected="OnTreeNodeSelected" />
     </div>
     }

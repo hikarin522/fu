@@ -9,6 +9,8 @@ namespace Fu.Components;
 
 public partial class ShogiBoard
 {
+    [Inject] private IUsiParser UsiParser { get; set; } = null!;
+
     [Parameter] public GameState State { get; set; } = GameState.Initial;
     [Parameter] public ShogiGameService GameService { get; set; } = null!;
     [Parameter] public EventCallback<Move> OnMoveMade { get; set; }
@@ -247,19 +249,17 @@ public partial class ShogiBoard
             yield break;
         }
 
-        var strokeWidths = new[] { 6, 4, 2 };
-
-        foreach (var candidate in this.CandidateMoves.Take(3)) {
-            if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) {
+        foreach (var candidate in this.CandidateMoves.Take(UIConstants.Arrow.MaxCandidatesToShow)) {
+            if (this.UsiParser.ParseMoveCoordinates(candidate.Move) is not { } move) {
                 continue;
             }
-            var (from, to, dropPiece) = move;
+            var (from, destination, dropPiece) = move;
 
             if (from is { } f) {
-                var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
-                var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
-                var fromDisplay = this.IsFlipped ? (8 - f.col, 8 - f.row) : (f.col, f.row);
-                yield return new ArrowData(fromDisplay.Item1, fromDisplay.Item2, toDisplay.Item1, toDisplay.Item2, strokeWidth, null);
+                var strokeWidth = UIConstants.Arrow.CandidateStrokeWidths[Math.Min(candidate.Rank - 1, UIConstants.Arrow.CandidateStrokeWidths.Length - 1)];
+                var destDisplay = this.IsFlipped ? (UIConstants.Board.FlipOffset - destination.col, UIConstants.Board.FlipOffset - destination.row) : (destination.col, destination.row);
+                var fromDisplay = this.IsFlipped ? (UIConstants.Board.FlipOffset - f.col, UIConstants.Board.FlipOffset - f.row) : (f.col, f.row);
+                yield return new ArrowData(fromDisplay.Item1, fromDisplay.Item2, destDisplay.Item1, destDisplay.Item2, strokeWidth, null);
             }
         }
     }
@@ -271,18 +271,16 @@ public partial class ShogiBoard
             yield break;
         }
 
-        var strokeWidths = new[] { 6, 4, 2 };
-
-        foreach (var candidate in this.CandidateMoves.Take(3)) {
-            if (ShogiEngineService.ParseSfenMove(candidate.Move) is not { } move) {
+        foreach (var candidate in this.CandidateMoves.Take(UIConstants.Arrow.MaxCandidatesToShow)) {
+            if (this.UsiParser.ParseMoveCoordinates(candidate.Move) is not { } move) {
                 continue;
             }
-            var (from, to, dropPiece) = move;
+            var (from, destination, dropPiece) = move;
 
             if (dropPiece is { } piece) {
-                var strokeWidth = strokeWidths[Math.Min(candidate.Rank - 1, strokeWidths.Length - 1)];
-                var toDisplay = this.IsFlipped ? (8 - to.col, 8 - to.row) : (to.col, to.row);
-                yield return new ArrowData(0, 0, toDisplay.Item1, toDisplay.Item2, strokeWidth, piece);
+                var strokeWidth = UIConstants.Arrow.CandidateStrokeWidths[Math.Min(candidate.Rank - 1, UIConstants.Arrow.CandidateStrokeWidths.Length - 1)];
+                var destDisplay = this.IsFlipped ? (UIConstants.Board.FlipOffset - destination.col, UIConstants.Board.FlipOffset - destination.row) : (destination.col, destination.row);
+                yield return new ArrowData(0, 0, destDisplay.Item1, destDisplay.Item2, strokeWidth, piece);
             }
         }
     }
@@ -342,8 +340,8 @@ public partial class ShogiBoard
             return null;
         }
 
-        var arrowHeadLength = strokeWidth * 2.5;
-        var arrowHeadWidth = strokeWidth * 1.5;
+        var arrowHeadLength = strokeWidth * UIConstants.Arrow.HeadLengthRatio;
+        var arrowHeadWidth = strokeWidth * UIConstants.Arrow.HeadWidthRatio;
         var unitX = dx / length;
         var unitY = dy / length;
         var perpX = -unitY;
@@ -353,7 +351,7 @@ public partial class ShogiBoard
         var adjX1 = x1;
         var adjY1 = y1;
         if (shortenStart) {
-            var shortenRatio = 15 / length;
+            var shortenRatio = UIConstants.Arrow.StartShortenPixels / length;
             adjX1 = x1 + dx * shortenRatio;
             adjY1 = y1 + dy * shortenRatio;
         }

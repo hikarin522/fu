@@ -9,7 +9,7 @@ namespace Fu.Core.Models;
 /// </summary>
 public readonly record struct Position(int Col, int Row)
 {
-    private const int BoardSize = 9;
+    private const int BoardSize = BoardConstants.Size;
 
     // 段の漢数字マッピング
     private static readonly FrozenDictionary<int, string> RowKanjiMap =

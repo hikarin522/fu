@@ -9,7 +9,7 @@ namespace Fu.Core.Models;
 /// </summary>
 public record Board
 {
-    public const int Size = 9;
+    public const int Size = BoardConstants.Size;
     private readonly ImmutableArray<Piece?> _squares;
 
     public Piece? this[int col, int row] => this._squares[col * Size + row];

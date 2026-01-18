@@ -28,7 +28,4 @@ public interface IStorageService
 
     /// <summary>キーが存在するか</summary>
     ValueTask<bool> ContainsAsync(string key, StorageScope scope = StorageScope.Persistent);
-
-    /// <summary>セッションデータを一括クリア</summary>
-    ValueTask ClearSessionAsync();
 }

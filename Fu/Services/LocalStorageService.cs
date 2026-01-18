@@ -9,19 +9,15 @@ namespace Fu.Services;
 /// <summary>
 /// localStorage を使用するストレージサービス実装
 /// </summary>
-public sealed class LocalStorageService : IStorageService
+public sealed class LocalStorageService(IJSRuntime js) : IStorageService
 {
     private const string PersistentPrefix = "fu:";
     private const string SessionPrefix = "fu_session:";
 
-    private readonly IJSRuntime _js;
-
-    public LocalStorageService(IJSRuntime js) => this._js = js;
-
     public async ValueTask<T?> GetAsync<T>(string key, StorageScope scope = StorageScope.Persistent)
     {
         var fullKey = GetFullKey(key, scope);
-        var json = await this._js.InvokeAsync<string?>("FuStorage.get", fullKey);
+        var json = await js.InvokeSafeAsync<string?>("localStorage.getItem", fullKey);
         if (json is null) {
             return default;
         }
@@ -38,23 +34,21 @@ public sealed class LocalStorageService : IStorageService
     {
         var fullKey = GetFullKey(key, scope);
         var json = JsonSerializer.Serialize(value);
-        await this._js.InvokeVoidAsync("FuStorage.set", fullKey, json);
+        await js.InvokeVoidSafeAsync("localStorage.setItem", fullKey, json);
     }
 
     public async ValueTask RemoveAsync(string key, StorageScope scope = StorageScope.Persistent)
     {
         var fullKey = GetFullKey(key, scope);
-        await this._js.InvokeVoidAsync("FuStorage.remove", fullKey);
+        await js.InvokeVoidSafeAsync("localStorage.removeItem", fullKey);
     }
 
     public async ValueTask<bool> ContainsAsync(string key, StorageScope scope = StorageScope.Persistent)
     {
         var fullKey = GetFullKey(key, scope);
-        return await this._js.InvokeAsync<bool>("FuStorage.contains", fullKey);
+        var value = await js.InvokeSafeAsync<string?>("localStorage.getItem", fullKey);
+        return value is not null;
     }
-
-    public async ValueTask ClearSessionAsync() =>
-        await this._js.InvokeVoidAsync("FuStorage.clearByPrefix", SessionPrefix);
 
     private static string GetFullKey(string key, StorageScope scope) =>
         scope == StorageScope.Session ? $"{SessionPrefix}{key}" : $"{PersistentPrefix}{key}";

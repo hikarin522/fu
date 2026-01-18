@@ -71,3 +71,6 @@ public record GameSession
     /// <summary>空のセッション</summary>
     public static GameSession Empty => new();
 }
+
+/// <summary>ローカルストレージに保存されるゲームセッション情報</summary>
+public sealed record GameSessionInfo(RoomId RoomId, string Nickname, PlayerId PlayerId);

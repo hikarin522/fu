@@ -1,8 +1,8 @@
-using Microsoft.JSInterop;
-
+using MessagePipe;
 using R3;
 
 using Fu.Core.Abstractions;
+using Fu.Core.Events;
 using Fu.Core.Models;
 using Fu.Core.Models.Dto;
 using Fu.Core.Services;
@@ -12,21 +12,30 @@ namespace Fu.Services;
 
 /// <summary>
 /// 対局セッションの管理サービス
-/// セッションの作成・復元・永続化、状態同期、フェーズ管理を担当
+/// 対局スコープの作成・破棄、セッションの作成・復元・永続化、状態同期、フェーズ管理を担当
 /// </summary>
-public class GameSessionService : IDisposable
+public class GameSessionService : IAsyncDisposable
 {
-    private readonly IGameTransport _transport;
-    private readonly ShogiGameService _gameService;
-    private readonly LobbyService _lobbyService;
-    private readonly IJSRuntime _js;
-    private readonly CompositeDisposable _disposables = [];
+    private const string GameSessionKey = "game_session";
+    private static readonly TimeSpan SessionMaxAge = TimeSpan.FromHours(24);
 
-    // フェーズ変更通知用Subject
+    private readonly IGameTransport _transport;
+    private readonly IGameScopeFactory _gameScopeFactory;
+    private readonly LobbyService _lobbyService;
+    private readonly IStorageService _storage;
+    private readonly UserSettingsService _userSettings;
+
+    // MessagePipe 購読管理
+    private readonly List<IDisposable> _subscriptions = [];
+
+    // フェーズ変更通知用Subject (UI用なのでR3のまま)
     private readonly Subject<GamePhase> _phaseChanged = new();
     private readonly Subject<Unit> _sessionChanged = new();
 
     private GamePhase _phase = GamePhase.Disconnected;
+
+    /// <summary>現在の対局スコープ（対局中のみ有効）</summary>
+    private IGameScope? _currentGameScope;
 
     /// <summary>現在のセッション</summary>
     public GameSession Session { get; private set; } = GameSession.Empty;
@@ -44,6 +53,12 @@ public class GameSessionService : IDisposable
         }
     }
 
+    /// <summary>対局スコープが有効かどうか</summary>
+    public bool HasActiveGameScope => this._currentGameScope?.IsActive ?? false;
+
+    /// <summary>現在の対局スコープ内のゲームサービス（対局中のみ有効）</summary>
+    public ShogiGameService? GameService => this._currentGameScope?.GetServiceOrDefault<ShogiGameService>();
+
     /// <summary>状態の権威者（ホスト）かどうか</summary>
     public bool IsAuthority => this._lobbyService.IsHost;
 
@@ -55,29 +70,31 @@ public class GameSessionService : IDisposable
 
     public GameSessionService(
         IGameTransport transport,
-        ShogiGameService gameService,
+        IGameScopeFactory gameScopeFactory,
         LobbyService lobbyService,
-        IJSRuntime js)
+        IStorageService storage,
+        UserSettingsService userSettings,
+        ISubscriber<TransportConnectionStateChangedEvent> connectionStateChanged,
+        ISubscriber<TransportParticipantJoinedEvent> participantJoined,
+        ISubscriber<TransportGameStateRequestedEvent> gameStateRequested)
     {
         this._transport = transport;
-        this._gameService = gameService;
+        this._gameScopeFactory = gameScopeFactory;
         this._lobbyService = lobbyService;
-        this._js = js;
+        this._storage = storage;
+        this._userSettings = userSettings;
 
         // 接続状態の変更を監視してフェーズを更新
-        this._lobbyService.ConnectionStateChanged
-            .Subscribe(this.OnConnectionStateChanged)
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            connectionStateChanged.Subscribe(e => this.OnConnectionStateChanged(e.State)));
 
         // 参加者が来た時（ホストなら状態同期を送信）
-        this._lobbyService.ParticipantJoined
-            .Subscribe(this.OnParticipantJoined)
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            participantJoined.Subscribe(e => this.OnParticipantJoined(e.Participant)));
 
         // ゲーム状態リクエストの処理を登録
-        this._transport.GameStateRequested
-            .SubscribeAwait(async (_, _) => await this.HandleGameStateRequestedAsync())
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            gameStateRequested.Subscribe(async _ => await this.HandleGameStateRequestedAsync()));
     }
 
     /// <summary>自分のプレイヤーID</summary>
@@ -87,7 +104,9 @@ public class GameSessionService : IDisposable
     public bool IsPlayer => this.Session.IsPlayer(this.MyPlayerId);
 
     /// <summary>自分が観戦者かどうか</summary>
-    public bool IsSpectator => this.Session.IsSpectator(this.MyPlayerId, this._gameService.State.Status);
+    public bool IsSpectator => this.GameService is { } gs
+        ? this.Session.IsSpectator(this.MyPlayerId, gs.State.Status)
+        : true;
 
     /// <summary>自分のTurn</summary>
     public Turn LocalTurn => this.Session.GetLocalTurn(this.MyPlayerId);
@@ -152,7 +171,7 @@ public class GameSessionService : IDisposable
 
             case TransportConnectionState.Connected:
                 // 接続完了時、ゲーム状態に応じてフェーズを決定
-                var gamePhase = this._gameService.State.Status.ToGamePhase();
+                var gamePhase = this.GameService?.State.Status.ToGamePhase() ?? GamePhase.Disconnected;
                 if (gamePhase == GamePhase.Disconnected) {
                     gamePhase = GamePhase.WaitingInLobby;
                 }
@@ -168,7 +187,7 @@ public class GameSessionService : IDisposable
     // OnBecameHost: ホストになった時の処理
     // 特別な処理は不要（IsAuthorityプロパティが自動的にtrueになる）
 
-    private void OnParticipantJoined(TransportParticipant participant)
+    private void OnParticipantJoined(TransportParticipantInfo participant)
     {
         // ホストの場合、新しい参加者に状態を同期
         if (this.IsAuthority && this.Session.IsConfigured) {
@@ -210,6 +229,36 @@ public class GameSessionService : IDisposable
 
     #endregion
 
+    #region 対局スコープ管理
+
+    /// <summary>
+    /// 新しい対局スコープを作成（既存のスコープがあればDisposeする）
+    /// </summary>
+    private async Task<IGameScope> CreateNewGameScopeAsync()
+    {
+        // 既存のスコープをDispose
+        if (this._currentGameScope is not null) {
+            await this._currentGameScope.DisposeAsync();
+        }
+
+        // 新しいスコープを作成
+        this._currentGameScope = this._gameScopeFactory.CreateScope();
+        return this._currentGameScope;
+    }
+
+    /// <summary>
+    /// 現在の対局スコープを破棄
+    /// </summary>
+    private async Task DisposeCurrentGameScopeAsync()
+    {
+        if (this._currentGameScope is not null) {
+            await this._currentGameScope.DisposeAsync();
+            this._currentGameScope = null;
+        }
+    }
+
+    #endregion
+
     #region ゲーム開始・終了
 
     /// <summary>
@@ -220,11 +269,16 @@ public class GameSessionService : IDisposable
         PlayerInfo gotePlayer,
         EvaluationDisplayOptions? options = null)
     {
-        this.Session = this.Session.WithPlayers(sentePlayer, gotePlayer, options);
+        // 新しい対局スコープを作成
+        var scope = await this.CreateNewGameScopeAsync();
+        var gameService = scope.GetService<ShogiGameService>();
+
+        // 明示的に新しいセッションを作成（前の対局情報をクリア）
+        this.Session = GameSession.Empty.WithPlayers(sentePlayer, gotePlayer, options);
 
         var localTurn = this.Session.GetLocalTurn(this.MyPlayerId);
-        await this._gameService.SetLocalTurnAsync(localTurn);
-        await this._gameService.NewGameAsync();
+        await gameService.SetLocalTurnAsync(localTurn);
+        await gameService.NewGameAsync();
 
         // 対局者の場合、セッション情報を永続化
         if (localTurn != Turn.None && this._transport.MyPlayerId is not null) {
@@ -246,16 +300,21 @@ public class GameSessionService : IDisposable
     /// <summary>
     /// リモートからのゲーム開始を適用
     /// </summary>
-    public async Task ApplyRemoteGameStartAsync(GameStartInfo info)
+    public async Task ApplyRemoteGameStartAsync(TransportGameStartInfo info)
     {
+        // 新しい対局スコープを作成
+        var scope = await this.CreateNewGameScopeAsync();
+        var gameService = scope.GetService<ShogiGameService>();
+
         var firstPlayer = new PlayerInfo(info.SentePlayerId, info.SenteNickname, Turn.First);
         var secondPlayer = new PlayerInfo(info.GotePlayerId, info.GoteNickname, Turn.Second);
 
-        this.Session = this.Session.WithPlayers(firstPlayer, secondPlayer, info.EvaluationOptions);
+        // 明示的に新しいセッションを作成（前の対局情報をクリア）
+        this.Session = GameSession.Empty.WithPlayers(firstPlayer, secondPlayer, info.EvaluationOptions);
 
         var localTurn = this.Session.GetLocalTurn(this.MyPlayerId);
-        await this._gameService.SetLocalTurnAsync(localTurn);
-        await this._gameService.NewGameAsync();
+        await gameService.SetLocalTurnAsync(localTurn);
+        await gameService.NewGameAsync();
 
         // 対局者の場合、セッション情報を永続化
         if (localTurn != Turn.None) {
@@ -271,16 +330,21 @@ public class GameSessionService : IDisposable
     /// <summary>
     /// ゲーム状態同期を適用（途中参加時）
     /// </summary>
-    public async Task ApplyGameStateSyncAsync(GameStateSyncInfo info)
+    public async Task ApplyGameStateSyncAsync(TransportGameStateSyncInfo info)
     {
+        // 新しい対局スコープを作成
+        var scope = await this.CreateNewGameScopeAsync();
+        var gameService = scope.GetService<ShogiGameService>();
+
         var firstPlayer = new PlayerInfo(info.SentePlayerId, info.SenteNickname, Turn.First);
         var secondPlayer = new PlayerInfo(info.GotePlayerId, info.GoteNickname, Turn.Second);
 
-        this.Session = this.Session.WithPlayers(firstPlayer, secondPlayer, info.EvaluationOptions);
+        // 明示的に新しいセッションを作成（前の対局情報をクリア）
+        this.Session = GameSession.Empty.WithPlayers(firstPlayer, secondPlayer, info.EvaluationOptions);
 
         var localTurn = this.Session.GetLocalTurn(this.MyPlayerId);
-        await this._gameService.SetLocalTurnAsync(localTurn);
-        await this._gameService.RestoreStateAsync(info.MoveHistory, info.Status, info.MoveTimes);
+        await gameService.SetLocalTurnAsync(localTurn);
+        await gameService.RestoreStateAsync(info.MoveHistory, info.Status, info.MoveTimes);
 
         // 対局者かつ対局中ならセッション保存、終了していればクリア
         if (localTurn != Turn.None) {
@@ -303,36 +367,41 @@ public class GameSessionService : IDisposable
     /// <summary>
     /// ゲーム状態同期データを取得
     /// </summary>
-    public GameStateForSync GetGameStateForSync() =>
-        new(
-            this._gameService.State.MoveHistory,
+    public GameStateForSync? GetGameStateForSync()
+    {
+        if (this.GameService is not { } gs) {
+            return null;
+        }
+        return new(
+            gs.State.MoveHistory,
             this.Session.FirstPlayerId ?? new PlayerId(""),
             this.Session.SecondPlayerId ?? new PlayerId(""),
             this.Session.FirstNickname,
             this.Session.SecondNickname,
-            this._gameService.State.Status,
+            gs.State.Status,
             this.Session.EvaluationOptions,
-            this._gameService.State.Times
+            gs.State.Times
         );
+    }
 
     /// <summary>
     /// ゲーム状態同期を送信
     /// </summary>
     public async Task SendGameStateSyncAsync()
     {
-        if (!this.Session.IsConfigured) {
+        if (!this.Session.IsConfigured || this.GameService is not { } gs) {
             return;
         }
 
         await this._transport.SendGameStateSyncAsync(
-            this._gameService.State.MoveHistory,
+            gs.State.MoveHistory,
             this.Session.FirstPlayerId!.Value,
             this.Session.SecondPlayerId!.Value,
             this.Session.FirstNickname,
             this.Session.SecondNickname,
-            this._gameService.State.Status,
+            gs.State.Status,
             this.Session.EvaluationOptions,
-            this._gameService.State.Times
+            gs.State.Times
         );
     }
 
@@ -341,7 +410,10 @@ public class GameSessionService : IDisposable
     /// </summary>
     public async Task ResignAsync()
     {
-        await this._gameService.ResignAsync();
+        if (this.GameService is not { } gs) {
+            return;
+        }
+        await gs.ResignAsync();
         await this._transport.SendResignAsync();
         await this.ClearSessionAsync();
 
@@ -353,7 +425,9 @@ public class GameSessionService : IDisposable
     /// </summary>
     public async Task ApplyRemoteResignAsync()
     {
-        await this._gameService.ResignAsync();
+        if (this.GameService is { } gs) {
+            await gs.ResignAsync();
+        }
         await this.ClearSessionAsync();
 
         this.TransitionTo(GamePhase.GameOver);
@@ -378,8 +452,11 @@ public class GameSessionService : IDisposable
     /// <summary>
     /// ロビーに戻る（再戦準備）
     /// </summary>
-    public void ReturnToLobby()
+    public async Task ReturnToLobbyAsync()
     {
+        // 対局スコープを破棄
+        await this.DisposeCurrentGameScopeAsync();
+
         this.Session = GameSession.Empty;
         this.TransitionTo(GamePhase.WaitingInLobby);
         this.NotifySessionChanged();
@@ -388,8 +465,11 @@ public class GameSessionService : IDisposable
     /// <summary>
     /// セッションをリセット
     /// </summary>
-    public void Reset()
+    public async Task ResetAsync()
     {
+        // 対局スコープを破棄
+        await this.DisposeCurrentGameScopeAsync();
+
         this.Session = GameSession.Empty;
         this.Phase = GamePhase.Disconnected;
     }
@@ -400,37 +480,50 @@ public class GameSessionService : IDisposable
 
     private async Task SaveSessionAsync()
     {
-        try {
-            var nickname = await this._js.InvokeAsync<string>("NicknameStorage.load");
-            var roomId = this.GetRoomIdFromTransport();
-            await this._js.InvokeVoidAsync("GameSession.save", roomId?.AsPrimitive(), nickname, this.MyPlayerId?.AsPrimitive());
+        var roomId = this._transport.RoomId;
+        if (roomId is null || this.MyPlayerId is null) {
+            return;
         }
-        catch {
-            // 保存失敗は無視
+        await this._storage.SetAsync(GameSessionKey, new StoredGameSession(
+            roomId.Value.AsPrimitive(),
+            this._userSettings.Nickname,
+            this.MyPlayerId.Value.AsPrimitive(),
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        ), StorageScope.Session);
+    }
+
+    /// <summary>
+    /// ゲームセッションを読み込み（期限切れの場合はnull）
+    /// </summary>
+    public async ValueTask<GameSessionInfo?> LoadGameSessionAsync()
+    {
+        var session = await this._storage.GetAsync<StoredGameSession>(GameSessionKey, StorageScope.Session);
+        if (session is null) {
+            return null;
         }
+
+        // 期限切れチェック
+        var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(session.Timestamp);
+        if (DateTimeOffset.UtcNow - timestamp > SessionMaxAge) {
+            await this.ClearSessionAsync();
+            return null;
+        }
+
+        return new GameSessionInfo(
+            new RoomId(session.RoomId),
+            session.Nickname,
+            new PlayerId(session.PeerId)
+        );
     }
 
     /// <summary>
     /// セッションをクリア
     /// </summary>
-    public async Task ClearSessionAsync()
-    {
-        try {
-            await this._js.InvokeVoidAsync("GameSession.clear");
-        }
-        catch {
-            // クリア失敗は無視
-        }
-    }
+    public async Task ClearSessionAsync() =>
+        await this._storage.RemoveAsync(GameSessionKey, StorageScope.Session);
 
-    private RoomId? GetRoomIdFromTransport()
-    {
-        // WebRtcServiceにRoomIdがある場合はそれを使用
-        if (this._transport is WebRtcService webRtc) {
-            return webRtc.RoomId;
-        }
-        return null;
-    }
+    /// <summary>保存用の内部型</summary>
+    private sealed record StoredGameSession(string RoomId, string Nickname, string PeerId, long Timestamp);
 
     #endregion
 
@@ -439,11 +532,19 @@ public class GameSessionService : IDisposable
         this._sessionChanged.OnNext(Unit.Default);
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
+        // 対局スコープを破棄
+        await this.DisposeCurrentGameScopeAsync();
+
+        // MessagePipe購読を解除
+        foreach (var subscription in this._subscriptions) {
+            subscription.Dispose();
+        }
+        this._subscriptions.Clear();
+
         this._phaseChanged.Dispose();
         this._sessionChanged.Dispose();
-        this._disposables.Dispose();
 
         GC.SuppressFinalize(this);
     }

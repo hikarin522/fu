@@ -1,6 +1,7 @@
-using R3;
+using MessagePipe;
 
 using Fu.Core.Abstractions;
+using Fu.Core.Events;
 using Fu.Core.Models;
 
 namespace Fu.Observers;
@@ -21,14 +22,15 @@ public class RemoteSpectatorObserver : IGameObserver, IDisposable
 
     public RemoteSpectatorObserver(
         IGameTransport transport,
-        Func<GameStateForSync> getGameState)
+        Func<GameStateForSync> getGameState,
+        ISubscriber<TransportGameStateRequestedEvent> gameStateRequestedSubscriber)
     {
         this._transport = transport;
         this._getGameState = getGameState;
 
         // 新しい参加者が来たらゲーム状態をリクエストされる
-        this._subscription = this._transport.GameStateRequested
-            .SubscribeAwait(async (_, _) => await this.HandleGameStateRequestedAsync());
+        this._subscription = gameStateRequestedSubscriber.Subscribe(
+            async _ => await this.HandleGameStateRequestedAsync());
     }
 
     public Task OnGameStartedAsync(Board board, Turn currentTurn, CapturedPieces firstCaptured, CapturedPieces secondCaptured)

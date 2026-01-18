@@ -1,16 +1,17 @@
 using System.Globalization;
 using System.Text;
 
+using Fu.Core.Abstractions;
 using Fu.Core.Models;
 
 namespace Fu.Core.Services;
 
-public static class KifExporter
+public class KifExporter : IKifExporter
 {
     private static readonly string[] RowKanji = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
     private static readonly string[] ColKanji = ["９", "８", "７", "６", "５", "４", "３", "２", "１"];
 
-    public static string Export(
+    public string Export(
         IReadOnlyList<Move> moves,
         GameStatus status,
         string senteNickname = "",
@@ -66,13 +67,7 @@ public static class KifExporter
         return sb.ToString();
     }
 
-    private static string FormatKifTime(TimeSpan time)
-    {
-        if (time.TotalHours >= 1) {
-            return $"{(int)time.TotalHours:D2}:{time.Minutes:D2}:{time.Seconds:D2}";
-        }
-        return $"{time.Minutes:D2}:{time.Seconds:D2}";
-    }
+    private static string FormatKifTime(TimeSpan time) => TimeFormatHelper.FormatKif(time);
 
     private static string FormatMove(Move move, Position? lastTo)
     {

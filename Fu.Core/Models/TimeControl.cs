@@ -66,56 +66,12 @@ public record PlayerTimeState(
     public bool IsExpired => this.RemainingTime <= TimeSpan.Zero && !this.IsInByoyomi;
 
     /// <summary>時間を消費して新しい状態を返す</summary>
-    public PlayerTimeState ConsumeTime(TimeSpan elapsed, TimeControlSettings settings)
-    {
-        return settings.Type switch {
-            TimeControlType.None => this,
-
-            TimeControlType.Sudden => this with {
-                RemainingTime = this.RemainingTime - elapsed
-            },
-
-            TimeControlType.Byoyomi when this.IsInByoyomi => this with {
-                RemainingTime = settings.Byoyomi // 秒読みはリセット
-            },
-
-            TimeControlType.Byoyomi => this.ConsumeWithByoyomiTransition(elapsed, settings),
-
-            TimeControlType.Fischer => this with {
-                RemainingTime = this.RemainingTime - elapsed + settings.Increment
-            },
-
-            TimeControlType.MainPlusByoyomi when this.IsInByoyomi => this with {
-                RemainingTime = settings.Byoyomi // 秒読みはリセット
-            },
-
-            TimeControlType.MainPlusByoyomi => this.ConsumeWithByoyomiTransition(elapsed, settings),
-
-            _ => this
-        };
-    }
-
-    private PlayerTimeState ConsumeWithByoyomiTransition(TimeSpan elapsed, TimeControlSettings settings)
-    {
-        var newRemaining = this.RemainingTime - elapsed;
-        if (newRemaining <= TimeSpan.Zero && settings.Byoyomi > TimeSpan.Zero) {
-            // 秒読みに移行
-            return this with {
-                RemainingTime = settings.Byoyomi,
-                IsInByoyomi = true
-            };
-        }
-        return this with { RemainingTime = newRemaining };
-    }
+    public PlayerTimeState ConsumeTime(TimeSpan elapsed, TimeControlSettings settings) =>
+        TimeControlStrategyFactory.Create(settings.Type).ConsumeTime(this, elapsed, settings);
 
     /// <summary>初期状態を作成</summary>
     public static PlayerTimeState Initial(TimeControlSettings settings) =>
-        settings.Type switch {
-            TimeControlType.None => new(TimeSpan.MaxValue),
-            TimeControlType.Byoyomi when settings.MainTime == TimeSpan.Zero =>
-                new(settings.Byoyomi, IsInByoyomi: true),
-            _ => new(settings.MainTime)
-        };
+        TimeControlStrategyFactory.Create(settings.Type).CreateInitialState(settings);
 }
 
 /// <summary>

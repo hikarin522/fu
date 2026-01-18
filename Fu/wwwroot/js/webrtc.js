@@ -1,356 +1,161 @@
 // WebRTC P2P Communication using Trystero (Serverless)
-// Uses Nostr strategy by default for peer discovery
+// Trystero ESMの動的インポートとイベントハンドラ登録のみJS側で行う
+// ID生成・ホスト選出・Storage管理はC#側で行う
 
-const NICKNAME_STORAGE_KEY = 'fu_nickname';
 const APP_ID = 'fu-shogi-game';
 
 let room = null;
 let dotNetRef = null;
-let myPeerId = null;  // Trysteroが割り当てる自分のpeer ID（最初の接続時に判明）
+let myPeerId = null;
 let isHost = false;
 let myNickname = '';
-let currentRoomId = null;
-let participants = new Map(); // peerId -> { nickname, isHost }
-let trysteroToDotNetId = new Map(); // Trystero peerId -> 我々が使うID（ニックネームベース）
-let pendingSelfId = null; // 自分のID（接続前に生成）
 
-// Trystero actions (names must be <= 12 bytes)
+// Trystero内部ID → C#側ID のマッピング
+// (Trysteroは独自のpeerIdを生成するため、C#で生成したIDと対応付けが必要)
+let trysteroToDotNetId = new Map();
+let participants = new Map();
+
+// Trystero actions
 let sendMessage = null;
 let sendPeerInfo = null;
-let sendPeerLeft = null;
 
 window.WebRtc = {
+    // 初期化（コールバック登録）
     initialize: function (dotNetReference) {
         dotNetRef = dotNetReference;
-        console.log('WebRTC (Trystero) initialized');
     },
 
-    // ルームを作成（ホスト）
-    createRoom: async function (nickname, savedPeerId = null) {
+    // ルームに参加（createRoom/joinRoomを統合）
+    joinRoom: async function (roomId, peerId, nickname, asHost) {
+        myPeerId = peerId;
         myNickname = nickname;
-        isHost = true;
-        currentRoomId = generateRoomId();
-        // 保存されたPeerIDがあれば再利用、なければ新規生成
-        if (savedPeerId) {
-            pendingSelfId = savedPeerId;
-            console.log('Reusing saved peer ID:', savedPeerId);
-        } else {
-            pendingSelfId = generateDotNetId(nickname);
-        }
-        myPeerId = pendingSelfId;
+        isHost = asHost;
 
-        if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
-        }
+        dotNetRef?.invokeMethodAsync('OnConnectionStateChangedCallback', 'connecting');
 
-        await joinTrysteroRoom(currentRoomId);
+        // Trystero ESMを動的インポート
+        const { joinRoom } = await import('https://esm.sh/trystero/nostr');
+        room = joinRoom({ appId: APP_ID }, roomId);
 
-        console.log('Room created with ID:', currentRoomId, 'My ID:', myPeerId);
-        return currentRoomId;
+        // メッセージアクション (名前は12バイト以下)
+        const [sendMsg, onMsg] = room.makeAction('msg');
+        const [sendPI, onPI] = room.makeAction('peerinfo');
+        sendMessage = sendMsg;
+        sendPeerInfo = sendPI;
+
+        // メッセージ受信 → C#に転送
+        onMsg((data, _) => {
+            dotNetRef?.invokeMethodAsync('OnMessageReceived', data);
+        });
+
+        // 参加者情報受信
+        onPI((data, tryseteroPeerId) => {
+            const info = JSON.parse(data);
+            const dotNetId = info.id;
+            const isKnown = trysteroToDotNetId.has(tryseteroPeerId);
+
+            if (!isKnown) {
+                // 新規参加者: ホスト重複チェック
+                let effectiveIsHost = info.isHost;
+                if (effectiveIsHost && [...participants.values()].some(p => p.isHost)) {
+                    effectiveIsHost = false;
+                }
+
+                trysteroToDotNetId.set(tryseteroPeerId, dotNetId);
+                participants.set(dotNetId, { nickname: info.nickname, isHost: effectiveIsHost });
+
+                dotNetRef?.invokeMethodAsync('OnParticipantJoinedCallback', dotNetId, info.nickname, effectiveIsHost);
+                if (participants.size >= 2) {
+                    dotNetRef?.invokeMethodAsync('OnDataChannelOpen');
+                }
+            } else {
+                // ホスト変更通知
+                const existing = participants.get(dotNetId);
+                if (existing && info.isHost && !existing.isHost) {
+                    if (isHost) {
+                        isHost = false;
+                        const myInfo = participants.get(myPeerId);
+                        if (myInfo) myInfo.isHost = false;
+                        dotNetRef?.invokeMethodAsync('OnHostStatusChanged', false);
+                    }
+                    existing.isHost = true;
+                }
+            }
+        });
+
+        // ピア参加 → 自分の情報を送信
+        room.onPeerJoin(_ => {
+            sendPeerInfo(JSON.stringify({ id: myPeerId, nickname: myNickname, isHost }));
+        });
+
+        // ピア退出 → C#に通知（ホスト選出はC#側）
+        room.onPeerLeave(tryseteroPeerId => {
+            const dotNetId = trysteroToDotNetId.get(tryseteroPeerId);
+            if (dotNetId) {
+                const wasHost = participants.get(dotNetId)?.isHost ?? false;
+                participants.delete(dotNetId);
+                trysteroToDotNetId.delete(tryseteroPeerId);
+                dotNetRef?.invokeMethodAsync('OnParticipantLeftCallback', dotNetId, wasHost);
+            }
+        });
+
+        // 自分を追加
+        participants.set(myPeerId, { nickname: myNickname, isHost });
+        dotNetRef?.invokeMethodAsync('OnParticipantJoinedCallback', myPeerId, myNickname, isHost);
     },
 
-    // ルームに参加（非ホスト）
-    joinRoom: async function (roomId, nickname, savedPeerId = null) {
-        myNickname = nickname;
-        isHost = false;
-        currentRoomId = roomId;
-        // 保存されたPeerIDがあれば再利用、なければ新規生成
-        if (savedPeerId) {
-            pendingSelfId = savedPeerId;
-            console.log('Reusing saved peer ID:', savedPeerId);
-        } else {
-            pendingSelfId = generateDotNetId(nickname);
-        }
-        myPeerId = pendingSelfId;
-
-        if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnConnectionStateChanged', 'connecting');
-        }
-
-        await joinTrysteroRoom(roomId);
-
-        console.log('Joining room:', roomId, 'My ID:', myPeerId);
-        return true;
-    },
-
-    // メッセージを送信（全員にブロードキャスト）
+    // メッセージ送信
     sendMessage: function (message) {
         if (sendMessage && room) {
             sendMessage(message);
-            console.log('Message broadcast:', message);
-            return true;
-        }
-        console.warn('Room not ready');
-        return false;
-    },
-
-    // 特定のピアにメッセージを送信
-    sendMessageTo: function (peerId, message) {
-        if (sendMessage && room) {
-            sendMessage(message, [peerId]);
-            console.log('Message sent to', peerId, ':', message);
             return true;
         }
         return false;
     },
 
-    getConnectionState: function () {
-        if (!room) return 'disconnected';
-        return participants.size > 1 ? 'connected' : 'connecting';
+    // ホスト昇格を他ピアに通知
+    notifyBecameHost: function () {
+        isHost = true;
+        const myInfo = participants.get(myPeerId);
+        if (myInfo) myInfo.isHost = true;
+        sendPeerInfo?.(JSON.stringify({ id: myPeerId, nickname: myNickname, isHost: true }));
     },
 
-    getParticipantCount: function () {
-        return participants.size;
-    },
-
-    isHostPeer: function () {
-        return isHost;
-    },
-
-    getMyPeerId: function () {
-        return myPeerId;
-    },
-
+    // 切断
     disconnect: function () {
-        if (room) {
-            room.leave();
-            room = null;
-        }
+        room?.leave();
+        room = null;
         sendMessage = null;
         sendPeerInfo = null;
-        sendPeerLeft = null;
         participants.clear();
         trysteroToDotNetId.clear();
         myPeerId = null;
-        pendingSelfId = null;
         isHost = false;
         myNickname = '';
-        currentRoomId = null;
-        console.log('Disconnected');
-    }
-};
-
-async function joinTrysteroRoom(roomId) {
-    // Trystero uses dynamic import
-    const { joinRoom } = await import('https://esm.sh/trystero/nostr');
-
-    const config = { appId: APP_ID };
-    room = joinRoom(config, roomId);
-
-    // メッセージアクションを設定 (names must be <= 12 bytes)
-    const [sendMsg, onMsg] = room.makeAction('msg');
-    sendMessage = sendMsg;
-
-    const [sendPI, onPI] = room.makeAction('peerinfo');
-    sendPeerInfo = sendPI;
-
-    const [sendPL, onPL] = room.makeAction('peerleft');
-    sendPeerLeft = sendPL;
-
-    // メッセージ受信ハンドラ
-    onMsg((data, peerId) => {
-        console.log('Message received from', peerId, ':', data);
-        if (dotNetRef) {
-            dotNetRef.invokeMethodAsync('OnMessageReceived', data);
-        }
-    });
-
-    // 参加者情報受信ハンドラ
-    onPI((data, tryseteroPeerId) => {
-        console.log('Peer info received from', tryseteroPeerId, ':', data);
-        const info = JSON.parse(data);
-        // 相手が送ってきた自己申告のIDを使用する
-        const dotNetId = info.id;
-
-        const isKnownPeer = trysteroToDotNetId.has(tryseteroPeerId);
-
-        if (!isKnownPeer) {
-            // 新規参加者の場合
-            // 既にホストがいる場合、新規参加者のisHostはfalseに上書き
-            // （元ホストが再接続してきた場合の対策）
-            let effectiveIsHost = info.isHost;
-            if (effectiveIsHost) {
-                const existingHost = [...participants.values()].find(p => p.isHost);
-                if (existingHost) {
-                    console.log('Host already exists, ignoring isHost claim from new peer', dotNetId);
-                    effectiveIsHost = false;
-                }
-            }
-
-            trysteroToDotNetId.set(tryseteroPeerId, dotNetId);
-            participants.set(dotNetId, { nickname: info.nickname, isHost: effectiveIsHost });
-            console.log('Mapped Trystero ID', tryseteroPeerId, 'to DotNet ID', dotNetId);
-            if (dotNetRef) {
-                dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', dotNetId, info.nickname, effectiveIsHost);
-
-                // 参加者が2人になったら接続完了（peerinfo受信後に通知）
-                if (participants.size >= 2) {
-                    dotNetRef.invokeMethodAsync('OnDataChannelOpen');
-                }
-            }
-        } else {
-            // 既知のピアからの更新（ホスト変更通知など）
-            const existing = participants.get(dotNetId);
-            if (existing && info.isHost && !existing.isHost) {
-                // 相手が新しくホストになった通知
-                // 自分がホストだった場合は自分のホスト状態を解除
-                if (isHost) {
-                    isHost = false;
-                    const myInfo = participants.get(myPeerId);
-                    if (myInfo) {
-                        myInfo.isHost = false;
-                    }
-                    console.log('Received host takeover notification, relinquishing host status');
-                    // C#側にもホスト状態解除を通知
-                    if (dotNetRef) {
-                        dotNetRef.invokeMethodAsync('OnHostStatusChanged', false);
-                    }
-                }
-                existing.isHost = true;
-                console.log('Updated host status for', dotNetId, 'to true (host takeover)');
-            }
-        }
-    });
-
-    // 参加者退出受信ハンドラ
-    onPL((data, tryseteroPeerId) => {
-        console.log('Peer left (Trystero ID):', tryseteroPeerId);
-        const dotNetId = trysteroToDotNetId.get(tryseteroPeerId);
-        if (dotNetId) {
-            participants.delete(dotNetId);
-            trysteroToDotNetId.delete(tryseteroPeerId);
-            if (dotNetRef) {
-                dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
-            }
-        }
-    });
-
-    // ピア参加ハンドラ
-    room.onPeerJoin(tryseteroPeerId => {
-        console.log('Peer joined (Trystero ID):', tryseteroPeerId);
-
-        // 自分の情報を送信（自己申告のIDを含める）
-        sendPeerInfo(JSON.stringify({
-            id: myPeerId,
-            nickname: myNickname,
-            isHost: isHost
-        }));
-
-        // 注: OnDataChannelOpenはpeerinfo受信後に呼ばれる（onPIハンドラ内）
-    });
-
-    // ピア退出ハンドラ
-    room.onPeerLeave(tryseteroPeerId => {
-        console.log('Peer left (Trystero ID):', tryseteroPeerId);
-        const dotNetId = trysteroToDotNetId.get(tryseteroPeerId);
-
-        if (dotNetId) {
-            // 退出したピアがホストかどうかを確認
-            const leftParticipant = participants.get(dotNetId);
-            const wasHost = leftParticipant?.isHost ?? false;
-
-            participants.delete(dotNetId);
-            trysteroToDotNetId.delete(tryseteroPeerId);
-
-            if (dotNetRef) {
-                dotNetRef.invokeMethodAsync('OnParticipantLeftCallback', dotNetId);
-
-                // ホストが退出した場合、決定論的に新ホストを選出
-                // （PeerIDの辞書順で最小のピアがホストになる）
-                if (wasHost && !isHost) {
-                    const remainingPeerIds = [...participants.keys()].sort();
-                    const shouldBecomeHost = remainingPeerIds.length > 0 && remainingPeerIds[0] === myPeerId;
-
-                    if (shouldBecomeHost) {
-                        isHost = true;
-                        // 自分の参加者情報を更新
-                        const myInfo = participants.get(myPeerId);
-                        if (myInfo) {
-                            myInfo.isHost = true;
-                        }
-                        console.log('Host left, becoming new host (elected):', myPeerId);
-                        dotNetRef.invokeMethodAsync('OnBecameHostCallback');
-
-                        // 他のピアに新ホスト情報を通知
-                        sendPeerInfo(JSON.stringify({
-                            id: myPeerId,
-                            nickname: myNickname,
-                            isHost: true
-                        }));
-                    } else {
-                        console.log('Host left, waiting for new host election. My ID:', myPeerId, 'Candidates:', remainingPeerIds);
-                    }
-                }
-                // 注: ルームは維持し続ける（相手が再接続してくる可能性があるため）
-                // OnDataChannelCloseは呼ばない
-            }
-        }
-    });
-
-    // 自分を参加者として追加
-    participants.set(myPeerId, { nickname: myNickname, isHost: isHost });
-
-    // 自分の参加を通知
-    if (dotNetRef) {
-        dotNetRef.invokeMethodAsync('OnParticipantJoinedCallback', myPeerId, myNickname, isHost);
-    }
-}
-
-function generateRoomId() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let result = '';
-    for (let i = 0; i < 6; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-}
-
-function generateDotNetId(nickname) {
-    // ニックネーム + ランダム文字列で一意性を確保
-    const randomPart = Math.random().toString(36).substring(2, 8);
-    return `${nickname}_${randomPart}`;
-}
-
-// Nickname storage
-window.NicknameStorage = {
-    save: function (nickname) {
-        try {
-            localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
-        } catch (e) {
-            console.warn('Failed to save nickname to localStorage:', e);
-        }
     },
 
-    load: function () {
-        try {
-            return localStorage.getItem(NICKNAME_STORAGE_KEY) || '';
-        } catch (e) {
-            console.warn('Failed to load nickname from localStorage:', e);
-            return '';
-        }
-    }
+    // 接続状態（C#側でも管理しているが、互換性のため残す）
+    getConnectionState: () => !room ? 'disconnected' : participants.size > 1 ? 'connected' : 'connecting',
+    getParticipantCount: () => participants.size,
+    isHostPeer: () => isHost
 };
 
-// Turn notification sound
+// 通知音 (AudioContext APIはJS側でのみ使用可能)
 let audioContext = null;
 
 window.TurnNotification = {
     play: function () {
         try {
-            // AudioContextは初回ユーザー操作後に作成する必要がある
             if (!audioContext) {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
-
-            // AudioContextがsuspended状態なら再開
             if (audioContext.state === 'suspended') {
                 audioContext.resume();
             }
 
             const now = audioContext.currentTime;
 
-            // 2つの音を重ねて和音のような通知音を作成
-            // 高い音（C5 = 523.25Hz）
+            // 高音 (C5)
             const osc1 = audioContext.createOscillator();
             const gain1 = audioContext.createGain();
             osc1.type = 'sine';
@@ -362,7 +167,7 @@ window.TurnNotification = {
             osc1.start(now);
             osc1.stop(now + 0.3);
 
-            // 低い音（G4 = 392Hz）少し遅れて
+            // 低音 (G4)
             const osc2 = audioContext.createOscillator();
             const gain2 = audioContext.createGain();
             osc2.type = 'sine';
@@ -373,124 +178,9 @@ window.TurnNotification = {
             gain2.connect(audioContext.destination);
             osc2.start(now + 0.05);
             osc2.stop(now + 0.35);
-
         } catch (e) {
-            console.warn('Failed to play turn notification sound:', e);
+            console.warn('Failed to play notification sound:', e);
         }
     }
 };
 
-// Sound settings storage
-const SOUND_SETTINGS_KEY = 'fu_sound_enabled';
-
-// Game session storage (for reconnection)
-const GAME_SESSION_KEY = 'fu_game_session';
-
-window.GameSession = {
-    save: function (roomId, nickname, peerId) {
-        try {
-            const session = {
-                roomId: roomId,
-                nickname: nickname,
-                peerId: peerId,
-                timestamp: Date.now()
-            };
-            localStorage.setItem(GAME_SESSION_KEY, JSON.stringify(session));
-        } catch (e) {
-            console.warn('Failed to save game session to localStorage:', e);
-        }
-    },
-
-    load: function () {
-        try {
-            const data = localStorage.getItem(GAME_SESSION_KEY);
-            if (!data) return null;
-
-            const session = JSON.parse(data);
-            // セッションが24時間以上古い場合は無効とみなす
-            const maxAge = 24 * 60 * 60 * 1000;
-            if (Date.now() - session.timestamp > maxAge) {
-                localStorage.removeItem(GAME_SESSION_KEY);
-                return null;
-            }
-            return session;
-        } catch (e) {
-            console.warn('Failed to load game session from localStorage:', e);
-            return null;
-        }
-    },
-
-    clear: function () {
-        try {
-            localStorage.removeItem(GAME_SESSION_KEY);
-        } catch (e) {
-            console.warn('Failed to clear game session from localStorage:', e);
-        }
-    }
-};
-
-window.SoundSettings = {
-    save: function (value) {
-        try {
-            localStorage.setItem(SOUND_SETTINGS_KEY, value);
-        } catch (e) {
-            console.warn('Failed to save sound setting to localStorage:', e);
-        }
-    },
-    load: function () {
-        try {
-            return localStorage.getItem(SOUND_SETTINGS_KEY);
-        } catch (e) {
-            console.warn('Failed to load sound setting from localStorage:', e);
-            return null;
-        }
-    }
-};
-
-// Generic localStorage wrapper for C# interop
-window.FuStorage = {
-    get: function (key) {
-        try {
-            return localStorage.getItem(key);
-        } catch (e) {
-            console.warn('Failed to get from localStorage:', e);
-            return null;
-        }
-    },
-    set: function (key, value) {
-        try {
-            localStorage.setItem(key, value);
-        } catch (e) {
-            console.warn('Failed to set to localStorage:', e);
-        }
-    },
-    remove: function (key) {
-        try {
-            localStorage.removeItem(key);
-        } catch (e) {
-            console.warn('Failed to remove from localStorage:', e);
-        }
-    },
-    contains: function (key) {
-        try {
-            return localStorage.getItem(key) !== null;
-        } catch (e) {
-            console.warn('Failed to check localStorage:', e);
-            return false;
-        }
-    },
-    clearByPrefix: function (prefix) {
-        try {
-            const keysToRemove = [];
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith(prefix)) {
-                    keysToRemove.push(key);
-                }
-            }
-            keysToRemove.forEach(key => localStorage.removeItem(key));
-        } catch (e) {
-            console.warn('Failed to clear localStorage by prefix:', e);
-        }
-    }
-};

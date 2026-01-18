@@ -6,55 +6,50 @@ using Fu.Core.Models;
 namespace Fu.Core;
 
 /// <summary>
-/// 将棋のルール判定（純粋関数）
+/// 将棋のルール判定
 /// </summary>
-public static class ShogiRules
+public class ShogiRules : IShogiRules
 {
-    private const int FirstPromotionBoundary = 2;  // 先手の成れる段（0-2）
-    private const int SecondPromotionBoundary = 6; // 後手の成れる段（6-8）
-
     /// <summary>指定位置から移動可能な位置を取得</summary>
-    public static List<Position> GetLegalMoves(Board board, Position from, Turn turn)
+    public List<Position> GetLegalMoves(Board board, Position from, Turn turn)
     {
         var piece = board[from];
         if (piece is null || piece.Owner != turn) {
             return [];
         }
 
-        var moves = GetPossibleMoves(board, from, piece);
-        return [.. moves.Where(to => !WouldBeInCheck(board, from, to, turn))];
+        var moves = this.GetPossibleMoves(board, from, piece);
+        return [.. moves.Where(to => !this.WouldBeInCheck(board, from, to, turn))];
     }
 
     /// <summary>指定プレイヤーが駒を打てる位置を取得</summary>
-    public static List<Position> GetLegalDropPositions(Board board, Turn turn, CapturedPieces captured, PieceType pieceType) =>
-        [.. Board.AllPositions.Where(pos => CanDropAt(board, turn, captured, pos, pieceType))];
+    public List<Position> GetLegalDropPositions(Board board, Turn turn, CapturedPieces captured, PieceType pieceType) =>
+        [.. Board.AllPositions.Where(pos => this.CanDropAt(board, turn, captured, pos, pieceType))];
 
     /// <summary>成れるかどうか</summary>
-    public static bool CanPromote(Board board, Position from, Position to)
+    public bool CanPromote(Board board, Position from, Position destination)
     {
         var piece = board[from];
         if (piece is null || !piece.Type.CanPromote() || piece.Type.IsPromoted()) {
             return false;
         }
 
-        return piece.Owner == Turn.First
-            ? from.Row <= FirstPromotionBoundary || to.Row <= FirstPromotionBoundary
-            : from.Row >= SecondPromotionBoundary || to.Row >= SecondPromotionBoundary;
+        return BoardConstants.CanPromote(from.Row, destination.Row, piece.Owner);
     }
 
     /// <summary>成らなければならないか</summary>
-    public static bool MustPromote(Board board, Position from, Position to)
+    public bool MustPromote(Board board, Position from, Position destination)
     {
         var piece = board[from];
         if (piece is null) {
             return false;
         }
 
-        return !CanExistAtRow(piece.Type, to.Row, piece.Owner);
+        return !CanExistAtRow(piece.Type, destination.Row, piece.Owner);
     }
 
     /// <summary>王手かどうか</summary>
-    public static bool IsInCheck(Board board, Turn turn)
+    public bool IsInCheck(Board board, Turn turn)
     {
         var kingPos = board.FindKing(turn);
         if (kingPos is null) {
@@ -62,22 +57,22 @@ public static class ShogiRules
         }
 
         return board.GetAllPieces(turn.GetOpponent())
-            .Any(x => GetPossibleMoves(board, x.pos, x.piece).Contains(kingPos.Value));
+            .Any(x => this.GetPossibleMoves(board, x.pos, x.piece).Contains(kingPos.Value));
     }
 
     /// <summary>詰みかどうか（合法手が存在しない）</summary>
-    public static bool IsCheckmate(Board board, Turn turn, CapturedPieces captured)
+    public bool IsCheckmate(Board board, Turn turn, CapturedPieces captured)
     {
         // 盤上の駒で合法手があるか
         foreach (var (pos, _) in board.GetAllPieces(turn)) {
-            if (GetLegalMoves(board, pos, turn).Count > 0) {
+            if (this.GetLegalMoves(board, pos, turn).Count > 0) {
                 return false;
             }
         }
 
         // 持ち駒を打てる場所があるか
         foreach (var (type, count) in captured.GetAll()) {
-            if (count > 0 && GetLegalDropPositions(board, turn, captured, type).Count > 0) {
+            if (count > 0 && this.GetLegalDropPositions(board, turn, captured, type).Count > 0) {
                 return false;
             }
         }
@@ -86,25 +81,25 @@ public static class ShogiRules
     }
 
     /// <summary>盤面に手を適用</summary>
-    public static (Board board, CapturedPieces firstCaptured, CapturedPieces secondCaptured) ApplyMove(
+    public (Board board, CapturedPieces firstCaptured, CapturedPieces secondCaptured) ApplyMove(
         Board board, Move move, Turn turn, CapturedPieces firstCaptured, CapturedPieces secondCaptured)
     {
         var captured = turn == Turn.First ? firstCaptured : secondCaptured;
 
         if (move.IsDrop) {
-            var newCaptured = captured.TryRemove(move.PieceType) ?? captured;
+            captured.TryRemove(move.PieceType);
             board = board.SetPiece(move.To, new Piece(move.PieceType, turn));
 
             return turn == Turn.First
-                ? (board, newCaptured, secondCaptured)
-                : (board, firstCaptured, newCaptured);
+                ? (board, captured, secondCaptured)
+                : (board, firstCaptured, captured);
         }
 
         if (move.From is { } from) {
             var piece = board[from];
             if (piece is not null) {
                 if (move.CapturedPiece is { } capturedType) {
-                    captured = captured.Add(capturedType);
+                    captured.Add(capturedType);
                 }
 
                 var newPiece = move.IsPromotion && piece.Type.CanPromote()
@@ -121,7 +116,7 @@ public static class ShogiRules
     }
 
     /// <summary>棋譜から盤面を再構築</summary>
-    public static (Board board, CapturedPieces firstCaptured, CapturedPieces secondCaptured, Turn currentTurn) ReconstructBoard(IEnumerable<Move> moves)
+    public (Board board, CapturedPieces firstCaptured, CapturedPieces secondCaptured, Turn currentTurn) ReconstructBoard(IEnumerable<Move> moves)
     {
         var board = new Board();
         var firstCaptured = CapturedPieces.Empty;
@@ -129,7 +124,7 @@ public static class ShogiRules
         var currentTurn = Turn.First;
 
         foreach (var move in moves) {
-            (board, firstCaptured, secondCaptured) = ApplyMove(board, move, currentTurn, firstCaptured, secondCaptured);
+            (board, firstCaptured, secondCaptured) = this.ApplyMove(board, move, currentTurn, firstCaptured, secondCaptured);
             currentTurn = currentTurn.GetOpponent();
         }
 
@@ -137,7 +132,7 @@ public static class ShogiRules
     }
 
     /// <summary>駒の移動可能な方向を取得（王手無視）</summary>
-    public static List<Position> GetPossibleMoves(Board board, Position from, Piece piece)
+    public List<Position> GetPossibleMoves(Board board, Position from, Piece piece)
     {
         List<Position> moves = [];
         var directions = GetMoveDirections(piece.Type, piece.Owner);
@@ -171,7 +166,7 @@ public static class ShogiRules
         return moves;
     }
 
-    private static bool CanDropAt(Board board, Turn turn, CapturedPieces captured, Position pos, PieceType pieceType)
+    private bool CanDropAt(Board board, Turn turn, CapturedPieces captured, Position pos, PieceType pieceType)
     {
         if (board[pos] is not null) {
             return false;
@@ -185,17 +180,17 @@ public static class ShogiRules
             return false;
         }
 
-        if (pieceType == PieceType.Pawn && WouldBePawnDropMate(board, turn, pos)) {
+        if (pieceType == PieceType.Pawn && this.WouldBePawnDropMate(board, turn, pos)) {
             return false;
         }
 
         var testBoard = board.SetPiece(pos, new Piece(pieceType, turn));
-        return !IsInCheck(testBoard, turn);
+        return !this.IsInCheck(testBoard, turn);
     }
 
     private static bool CanExistAtRow(PieceType type, int row, Turn turn)
     {
-        var effectiveRow = turn == Turn.First ? row : Board.Size - 1 - row;
+        var effectiveRow = turn == Turn.First ? row : BoardConstants.Size - 1 - row;
 
         return type switch {
             PieceType.Pawn or PieceType.Lance => effectiveRow > 0,
@@ -204,7 +199,7 @@ public static class ShogiRules
         };
     }
 
-    private static bool WouldBePawnDropMate(Board board, Turn turn, Position dropPos)
+    private bool WouldBePawnDropMate(Board board, Turn turn, Position dropPos)
     {
         var opponent = turn.GetOpponent();
         var kingPos = board.FindKing(opponent);
@@ -219,10 +214,10 @@ public static class ShogiRules
 
         var tempBoard = board.SetPiece(dropPos, new Piece(PieceType.Pawn, turn));
 
-        var kingMoves = GetPossibleMoves(tempBoard, kingPos.Value, tempBoard[kingPos.Value]!);
+        var kingMoves = this.GetPossibleMoves(tempBoard, kingPos.Value, tempBoard[kingPos.Value]!);
         foreach (var move in kingMoves) {
             var testBoard = tempBoard.MovePiece(kingPos.Value, move);
-            if (!IsInCheck(testBoard, opponent)) {
+            if (!this.IsInCheck(testBoard, opponent)) {
                 return false;
             }
         }
@@ -232,10 +227,10 @@ public static class ShogiRules
                 continue;
             }
 
-            var moves = GetPossibleMoves(board, pos, piece);
+            var moves = this.GetPossibleMoves(board, pos, piece);
             if (moves.Contains(dropPos)) {
                 var testBoard = tempBoard.MovePiece(pos, dropPos);
-                if (!IsInCheck(testBoard, opponent)) {
+                if (!this.IsInCheck(testBoard, opponent)) {
                     return false;
                 }
             }
@@ -244,10 +239,10 @@ public static class ShogiRules
         return true;
     }
 
-    private static bool WouldBeInCheck(Board board, Position from, Position to, Turn turn)
+    private bool WouldBeInCheck(Board board, Position from, Position to, Turn turn)
     {
         var testBoard = board.MovePiece(from, to);
-        return IsInCheck(testBoard, turn);
+        return this.IsInCheck(testBoard, turn);
     }
 
     private static readonly FrozenDictionary<(PieceType, int), (int dc, int dr, bool slide)[]> DirectionCache =

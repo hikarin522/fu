@@ -51,15 +51,15 @@ public sealed class StopwatchGameTimer : IGameTimer
 }
 
 /// <summary>
-/// タイマーファクトリ
+/// タイマーファクトリの実装
 /// </summary>
-public static class GameTimerFactory
+public class GameTimerFactory : IGameTimerFactory
 {
     /// <summary>TimeControlSettings から適切なタイマーを生成</summary>
-    public static IGameTimer Create(TimeControlSettings settings) =>
+    public IGameTimer Create(TimeControlSettings settings) =>
         new StopwatchGameTimer(settings.RoundingMode);
 
     /// <summary>デフォルトのタイマーを生成（秒切り捨て）</summary>
-    public static IGameTimer CreateDefault() =>
+    public IGameTimer CreateDefault() =>
         new StopwatchGameTimer(TimeRoundingMode.FloorSeconds);
 }

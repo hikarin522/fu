@@ -1,6 +1,5 @@
-using R3;
-
 using Fu.Core.Abstractions;
+using Fu.Core.Events;
 using Fu.Core.Models;
 
 namespace Fu.Services;
@@ -9,18 +8,18 @@ namespace Fu.Services;
 /// ロビー/ルーム管理サービス
 /// ルームの作成・参加・参加者管理を担当
 /// </summary>
-public class LobbyService(IGameTransport transport)
+public class LobbyService(ITransportConnection transport)
 {
     #region プロパティ
 
     /// <summary>現在のルーム</summary>
     public Room CurrentRoom => new(
-        this.RoomId ?? new RoomId(""),
+        (transport as IGameTransport)?.RoomId ?? new RoomId(""),
         transport.Participants,
-        transport.Participants.FirstOrDefault(p => p.IsHost)?.PlayerId);
+        transport.Participants.Where(p => p.IsHost).Select(p => p.PlayerId).FirstOrDefault());
 
     /// <summary>ルームID</summary>
-    public RoomId? RoomId { get; private set; }
+    public RoomId? RoomId => (transport as IGameTransport)?.RoomId;
 
     /// <summary>自分のプレイヤーID</summary>
     public PlayerId? MyPlayerId => transport.MyPlayerId;
@@ -35,29 +34,10 @@ public class LobbyService(IGameTransport transport)
     public bool IsHost => transport.IsHost;
 
     /// <summary>参加者一覧</summary>
-    public IReadOnlyCollection<TransportParticipant> Participants => transport.Participants;
+    public IReadOnlyCollection<TransportParticipantInfo> Participants => transport.Participants;
 
     /// <summary>接続状態</summary>
     public TransportConnectionState ConnectionState => transport.ConnectionState;
-
-    #endregion
-
-    #region Observable
-
-    /// <summary>参加者が加わった時</summary>
-    public Observable<TransportParticipant> ParticipantJoined => transport.ParticipantJoined;
-
-    /// <summary>参加者が離脱した時</summary>
-    public Observable<PlayerId> ParticipantLeft => transport.ParticipantLeft;
-
-    /// <summary>準備完了時</summary>
-    public Observable<Unit> Ready => transport.Ready;
-
-    /// <summary>接続状態が変化した時</summary>
-    public Observable<TransportConnectionState> ConnectionStateChanged => transport.ConnectionStateChanged;
-
-    /// <summary>ホストになった時</summary>
-    public Observable<Unit> BecameHost => transport.BecameHost;
 
     #endregion
 
@@ -71,29 +51,19 @@ public class LobbyService(IGameTransport transport)
     /// <summary>
     /// ルームを作成
     /// </summary>
-    public async Task<RoomId> CreateRoomAsync(string nickname, string? savedPlayerId = null)
-    {
-        this.RoomId = await transport.CreateRoomAsync(nickname, savedPlayerId);
-        return this.RoomId.Value;
-    }
+    public Task<RoomId> CreateRoomAsync(string nickname, PlayerId? savedPlayerId = null) =>
+        transport.CreateRoomAsync(nickname, savedPlayerId);
 
     /// <summary>
     /// ルームに参加
     /// </summary>
-    public async Task JoinRoomAsync(RoomId roomId, string nickname, string? savedPlayerId = null)
-    {
-        await transport.JoinRoomAsync(roomId, nickname, savedPlayerId);
-        this.RoomId = roomId;
-    }
+    public Task JoinRoomAsync(RoomId roomId, string nickname, PlayerId? savedPlayerId = null) =>
+        transport.JoinRoomAsync(roomId, nickname, savedPlayerId);
 
     /// <summary>
     /// 切断
     /// </summary>
-    public async Task DisconnectAsync()
-    {
-        await transport.DisconnectAsync();
-        this.RoomId = null;
-    }
+    public Task DisconnectAsync() => transport.DisconnectAsync();
 
     #endregion
 }

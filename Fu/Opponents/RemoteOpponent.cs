@@ -1,6 +1,9 @@
 using R3;
 
+using MessagePipe;
+
 using Fu.Core.Abstractions;
+using Fu.Core.Events;
 using Fu.Core.Models;
 
 namespace Fu.Opponents;
@@ -13,7 +16,7 @@ public class RemoteOpponent : IOpponent, IDisposable
     private readonly IGameTransport _transport;
     private readonly Subject<(Move Move, TimeSpan Elapsed)> _moveReceived = new();
     private readonly Subject<Unit> _resignReceived = new();
-    private readonly CompositeDisposable _disposables = [];
+    private readonly List<IDisposable> _subscriptions = [];
 
     /// <summary>プレイヤー情報</summary>
     public RemotePlayerInfo Player { get; private set; }
@@ -29,19 +32,23 @@ public class RemoteOpponent : IOpponent, IDisposable
     /// <summary>投了を受信した時</summary>
     public Observable<Unit> ResignReceived => this._resignReceived;
 
-    public RemoteOpponent(IGameTransport transport, RemotePlayerInfo player)
+    public RemoteOpponent(
+        IGameTransport transport,
+        RemotePlayerInfo player,
+        ISubscriber<TransportMoveReceivedEvent> moveReceivedSubscriber,
+        ISubscriber<TransportResignReceivedEvent> resignReceivedSubscriber)
     {
         this._transport = transport;
         this.Player = player;
 
-        // トランスポートのイベントを購読
-        this._transport.MoveReceived
-            .Subscribe(data => this._moveReceived.OnNext(data))
-            .AddTo(this._disposables);
+        // MessagePipeのイベントを購読
+        this._subscriptions.Add(
+            moveReceivedSubscriber.Subscribe(e =>
+                this._moveReceived.OnNext((e.Move, e.Elapsed))));
 
-        this._transport.ResignReceived
-            .Subscribe(_ => this._resignReceived.OnNext(Unit.Default))
-            .AddTo(this._disposables);
+        this._subscriptions.Add(
+            resignReceivedSubscriber.Subscribe(_ =>
+                this._resignReceived.OnNext(Unit.Default)));
     }
 
     /// <summary>プレイヤー情報を更新</summary>
@@ -74,12 +81,15 @@ public class RemoteOpponent : IOpponent, IDisposable
     /// <summary>イベント購読を解除</summary>
     public void Unsubscribe()
     {
-        this._disposables.Dispose();
+        foreach (var subscription in this._subscriptions) {
+            subscription.Dispose();
+        }
+        this._subscriptions.Clear();
     }
 
     public void Dispose()
     {
-        this._disposables.Dispose();
+        this.Unsubscribe();
         this._moveReceived.Dispose();
         this._resignReceived.Dispose();
         GC.SuppressFinalize(this);

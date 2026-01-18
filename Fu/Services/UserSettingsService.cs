@@ -2,27 +2,29 @@ using Microsoft.JSInterop;
 
 using R3;
 
+using Fu.Core.Abstractions;
+
 namespace Fu.Services;
 
 /// <summary>
 /// ユーザー設定の管理サービス
 /// 通知音、その他ユーザー設定の永続化を担当
 /// </summary>
-public class UserSettingsService : IDisposable
+public class UserSettingsService(IJSRuntime js, IStorageService storage) : IDisposable
 {
-    private readonly IJSRuntime _js;
+    private const string SoundEnabledKey = "sound_enabled";
+    private const string NicknameKey = "nickname";
+
     private readonly Subject<Unit> _settingsChanged = new();
 
     /// <summary>通知音が有効か</summary>
     public bool SoundEnabled { get; private set; } = true;
 
+    /// <summary>ニックネーム</summary>
+    public string Nickname { get; private set; } = "";
+
     /// <summary>設定が変更された時</summary>
     public Observable<Unit> SettingsChanged => this._settingsChanged;
-
-    public UserSettingsService(IJSRuntime js)
-    {
-        this._js = js;
-    }
 
     /// <summary>
     /// 設定を読み込む
@@ -30,6 +32,16 @@ public class UserSettingsService : IDisposable
     public async Task LoadAsync()
     {
         this.SoundEnabled = await this.LoadSoundSettingAsync();
+        this.Nickname = await storage.GetAsync<string>(NicknameKey) ?? "";
+    }
+
+    /// <summary>
+    /// ニックネームを保存
+    /// </summary>
+    public async Task SaveNicknameAsync(string nickname)
+    {
+        this.Nickname = nickname;
+        await storage.SetAsync(NicknameKey, nickname);
     }
 
     /// <summary>
@@ -52,7 +64,7 @@ public class UserSettingsService : IDisposable
         }
 
         try {
-            await this._js.InvokeVoidAsync("TurnNotification.play");
+            await js.InvokeVoidAsync("TurnNotification.play");
         }
         catch {
             // 音声再生に失敗しても無視
@@ -63,24 +75,12 @@ public class UserSettingsService : IDisposable
 
     private async Task<bool> LoadSoundSettingAsync()
     {
-        try {
-            var value = await this._js.InvokeAsync<string?>("SoundSettings.load");
-            return value != "false"; // デフォルトはtrue
-        }
-        catch {
-            return true;
-        }
+        var value = await storage.GetAsync<bool?>(SoundEnabledKey);
+        return value ?? true; // デフォルトはtrue
     }
 
-    private async Task SaveSoundSettingAsync(bool enabled)
-    {
-        try {
-            await this._js.InvokeVoidAsync("SoundSettings.save", enabled ? "true" : "false");
-        }
-        catch {
-            // 保存失敗は無視
-        }
-    }
+    private async Task SaveSoundSettingAsync(bool enabled) =>
+        await storage.SetAsync(SoundEnabledKey, enabled);
 
     #endregion
 

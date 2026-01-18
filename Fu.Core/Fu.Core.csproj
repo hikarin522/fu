@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="MessagePipe" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="R3" />
     <PackageReference Include="UnitGenerator" PrivateAssets="all" />
   </ItemGroup>

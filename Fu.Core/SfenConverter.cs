@@ -8,10 +8,13 @@ namespace Fu.Core;
 /// <summary>
 /// SFEN形式との相互変換
 /// </summary>
-public static class SfenConverter
+public class SfenConverter : ISfenConverter
 {
+    /// <summary>初期局面のSFEN</summary>
+    public const string StartPosition = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+
     /// <summary>盤面をSFEN形式に変換</summary>
-    public static string ToSfen(Board board, Turn currentTurn, CapturedPieces firstCaptured, CapturedPieces secondCaptured)
+    public string ToSfen(Board board, Turn currentTurn, CapturedPieces firstCaptured, CapturedPieces secondCaptured)
     {
         var sb = new StringBuilder();
 
@@ -28,7 +31,7 @@ public static class SfenConverter
                         sb.Append(emptyCount);
                         emptyCount = 0;
                     }
-                    sb.Append(PieceToSfen(piece));
+                    sb.Append(this.PieceToSfen(piece));
                 }
             }
             if (emptyCount > 0) {
@@ -43,7 +46,7 @@ public static class SfenConverter
         sb.Append(currentTurn == Turn.First ? " b " : " w ");
 
         // 持ち駒
-        var captured = CapturedToSfen(firstCaptured, true) + CapturedToSfen(secondCaptured, false);
+        var captured = this.CapturedToSfen(firstCaptured, true) + this.CapturedToSfen(secondCaptured, false);
         sb.Append(string.IsNullOrEmpty(captured) ? "-" : captured);
 
         // 手数（常に1）
@@ -53,7 +56,7 @@ public static class SfenConverter
     }
 
     /// <summary>駒をSFEN形式に変換</summary>
-    public static string PieceToSfen(Piece piece)
+    public string PieceToSfen(Piece piece)
     {
         var basePiece = piece.Type.IsPromoted() ? piece.Type.GetUnpromotedType() : piece.Type;
         var c = basePiece switch {
@@ -74,7 +77,7 @@ public static class SfenConverter
     }
 
     /// <summary>持ち駒をSFEN形式に変換</summary>
-    public static string CapturedToSfen(CapturedPieces captured, bool isFirst)
+    public string CapturedToSfen(CapturedPieces captured, bool isFirst)
     {
         var sb = new StringBuilder();
 
@@ -98,7 +101,4 @@ public static class SfenConverter
 
         return sb.ToString();
     }
-
-    /// <summary>初期局面のSFEN</summary>
-    public const string StartPosition = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 }

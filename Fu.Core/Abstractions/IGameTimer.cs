@@ -1,3 +1,5 @@
+using Fu.Core.Models;
+
 namespace Fu.Core.Abstractions;
 
 /// <summary>
@@ -16,4 +18,16 @@ public interface IGameTimer
 
     /// <summary>タイマーが動作中か</summary>
     bool IsRunning { get; }
+}
+
+/// <summary>
+/// ゲームタイマーを生成するファクトリのインターフェース
+/// </summary>
+public interface IGameTimerFactory
+{
+    /// <summary>TimeControlSettings から適切なタイマーを生成</summary>
+    IGameTimer Create(TimeControlSettings settings);
+
+    /// <summary>デフォルトのタイマーを生成</summary>
+    IGameTimer CreateDefault();
 }

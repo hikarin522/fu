@@ -6,10 +6,10 @@ namespace Fu.Core;
 /// <summary>
 /// USI形式のパース
 /// </summary>
-public static class UsiParser
+public class UsiParser : IUsiParser
 {
     /// <summary>USI形式の手をMoveにパース</summary>
-    public static Move? ParseMove(string usiMove, Board board, Turn turn)
+    public Move? ParseMove(string usiMove, Board board, Turn turn)
     {
         if (string.IsNullOrEmpty(usiMove) || usiMove.Length < 4) {
             return null;
@@ -17,7 +17,7 @@ public static class UsiParser
 
         // 駒打ち（例: P*3d）
         if (usiMove.Length >= 4 && usiMove[1] == '*') {
-            var pieceType = CharToPieceType(usiMove[0]);
+            var pieceType = this.CharToPieceType(usiMove[0]);
             if (pieceType is null) {
                 return null;
             }
@@ -57,7 +57,7 @@ public static class UsiParser
     }
 
     /// <summary>SFEN形式の指し手をパースして座標を返す</summary>
-    public static ((int col, int row)? from, (int col, int row) to, char? dropPiece)? ParseMoveCoordinates(string sfenMove)
+    public ((int col, int row)? from, (int col, int row) destination, char? dropPiece)? ParseMoveCoordinates(string sfenMove)
     {
         if (string.IsNullOrEmpty(sfenMove) || sfenMove.Length < 4) {
             return null;
@@ -89,7 +89,7 @@ public static class UsiParser
     }
 
     /// <summary>USI文字を駒種類に変換</summary>
-    public static PieceType? CharToPieceType(char c) => c switch {
+    public PieceType? CharToPieceType(char c) => c switch {
         'P' => PieceType.Pawn,
         'L' => PieceType.Lance,
         'N' => PieceType.Knight,

@@ -13,10 +13,9 @@ namespace Fu.Services;
 /// </summary>
 public class ShogiEngineService : IAsyncDisposable
 {
-    /// <summary>詰みスコアの基準値（USIプロトコル）</summary>
-    private const int MateScoreBase = 30000;
-
     private readonly IJSRuntime _jsRuntime;
+    private readonly IUsiParser _usiParser;
+    private readonly ISfenConverter _sfenConverter;
     private readonly Subject<Unit> _evaluationUpdated = new();
     private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
     private bool _initialized;
@@ -70,7 +69,12 @@ public class ShogiEngineService : IAsyncDisposable
     /// <summary>評価値が更新された時</summary>
     public Observable<Unit> EvaluationUpdated => this._evaluationUpdated;
 
-    public ShogiEngineService(IJSRuntime jsRuntime) => this._jsRuntime = jsRuntime;
+    public ShogiEngineService(IJSRuntime jsRuntime, IUsiParser usiParser, ISfenConverter sfenConverter)
+    {
+        this._jsRuntime = jsRuntime;
+        this._usiParser = usiParser;
+        this._sfenConverter = sfenConverter;
+    }
 
     /// <summary>エンジンを初期化</summary>
     public async Task<bool> InitializeAsync()
@@ -90,15 +94,16 @@ public class ShogiEngineService : IAsyncDisposable
             }
 
             this._dotNetRef = DotNetObjectReference.Create(this);
-            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
 
-            var success = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init");
+            // 初期化時にコールバックも渡す
+            var success = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init", this._dotNetRef);
             this._initialized = true;
             this.IsAvailable = success;
 
             if (success) {
                 // エンジンの設定
-                await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "isready");
+                await this.SendCommandAsync("usi");
+                await this.SendCommandAsync("isready");
             }
 
             return success;
@@ -110,6 +115,10 @@ public class ShogiEngineService : IAsyncDisposable
             return false;
         }
     }
+
+    /// <summary>エンジンにコマンドを送信</summary>
+    private async Task<bool> SendCommandAsync(string command) =>
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.postMessage", command);
 
     /// <summary>局面を分析（MoveTreeベース）</summary>
     /// <param name="depth">探索深さ（0 = 無限探索）</param>
@@ -163,13 +172,17 @@ public class ShogiEngineService : IAsyncDisposable
 
         // MultiPVを設定（値が変わった時のみ送信）
         if (multiPv != this._lastMultiPv) {
-            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
+            await this.SendCommandAsync($"setoption name MultiPV value {multiPv}");
             this._lastMultiPv = multiPv;
         }
 
         // SFEN生成してエンジンに送信
-        var sfen = SfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
+        var sfen = this._sfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
+
+        // 探索停止→局面設定→探索開始
+        await this.SendCommandAsync("stop");
+        await this.SendCommandAsync($"position sfen {sfen}");
+        await this.SendCommandAsync(depth > 0 ? $"go depth {depth}" : "go infinite");
     }
 
     /// <summary>ノードからキャッシュを取得</summary>
@@ -228,7 +241,7 @@ public class ShogiEngineService : IAsyncDisposable
         }
 
         this._isAnalyzing = false;
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
+        await this.SendCommandAsync("stop");
     }
 
     /// <summary>エンジンからのメッセージを処理</summary>
@@ -396,7 +409,7 @@ public class ShogiEngineService : IAsyncDisposable
                         score = cp;
                     }
                     else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
-                        score = mate > 0 ? MateScoreBase - mate : -MateScoreBase - mate;
+                        score = mate > 0 ? EvaluationConstants.MateScoreBase - mate : -EvaluationConstants.MateScoreBase - mate;
                         mateIn = mate;
                     }
                     break;
@@ -438,8 +451,8 @@ public class ShogiEngineService : IAsyncDisposable
     }
 
     /// <summary>SFEN形式の指し手をパースして移動元・移動先の座標を返す</summary>
-    public static ((int col, int row)? from, (int col, int row) to, char? dropPiece)? ParseSfenMove(string sfenMove) =>
-        UsiParser.ParseMoveCoordinates(sfenMove);
+    public ((int col, int row)? from, (int col, int row) destination, char? dropPiece)? ParseSfenMove(string sfenMove) =>
+        this._usiParser.ParseMoveCoordinates(sfenMove);
 
     public async ValueTask DisposeAsync()
     {

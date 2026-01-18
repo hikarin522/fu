@@ -1,4 +1,4 @@
-using Fu.Core.Abstractions;
+using Fu.Core.Events;
 
 namespace Fu.Core.Models;
 
@@ -7,7 +7,7 @@ namespace Fu.Core.Models;
 /// </summary>
 public record Room(
     RoomId Id,
-    IReadOnlyCollection<TransportParticipant> Participants,
+    IReadOnlyCollection<TransportParticipantInfo> Participants,
     PlayerId? HostPlayerId)
 {
     /// <summary>指定したプレイヤーがホストかどうか</summary>
@@ -15,7 +15,7 @@ public record Room(
         playerId is not null && playerId == this.HostPlayerId;
 
     /// <summary>参加者を取得</summary>
-    public TransportParticipant? GetParticipant(PlayerId playerId) =>
+    public TransportParticipantInfo? GetParticipant(PlayerId playerId) =>
         this.Participants.FirstOrDefault(p => p.PlayerId == playerId);
 
     /// <summary>参加者数</summary>
