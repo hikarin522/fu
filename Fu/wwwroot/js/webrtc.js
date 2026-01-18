@@ -446,3 +446,37 @@ window.SoundSettings = {
         }
     }
 };
+
+// Generic localStorage wrapper for C# interop
+window.FuStorage = {
+    get: function (key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            console.warn('Failed to get from localStorage:', e);
+            return null;
+        }
+    },
+    set: function (key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (e) {
+            console.warn('Failed to set to localStorage:', e);
+        }
+    },
+    remove: function (key) {
+        try {
+            localStorage.removeItem(key);
+        } catch (e) {
+            console.warn('Failed to remove from localStorage:', e);
+        }
+    },
+    contains: function (key) {
+        try {
+            return localStorage.getItem(key) !== null;
+        } catch (e) {
+            console.warn('Failed to check localStorage:', e);
+            return false;
+        }
+    }
+};
