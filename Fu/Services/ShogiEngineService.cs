@@ -409,14 +409,22 @@ public class ShogiEngineService : IAsyncDisposable
     {
         var result = this._candidates.Values.OrderBy(c => c.Rank).ToList();
 
-        // 前の深さの候補手で補完
+        // 前の深さの候補手で補完（現在の候補手と同じ手は除外）
         if (this._previousCandidates.Count > 0 && this._newDepthCandidateCount > 0) {
-            var shift = this._newDepthCandidateCount;
+            // 現在の候補手の指し手を収集
+            var currentMoves = this._candidates.Values
+                .Select(c => c.Move)
+                .ToHashSet();
+
+            var nextRank = this._newDepthCandidateCount + 1;
             foreach (var prev in this._previousCandidates.Values.OrderBy(c => c.Rank)) {
-                var newRank = prev.Rank + shift;
-                if (!this._candidates.ContainsKey(newRank)) {
-                    result.Add(prev with { Rank = newRank });
+                // 現在の候補手と同じ手はスキップ
+                if (currentMoves.Contains(prev.Move)) {
+                    continue;
                 }
+
+                result.Add(prev with { Rank = nextRank });
+                nextRank++;
             }
         }
 
