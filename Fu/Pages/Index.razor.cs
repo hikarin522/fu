@@ -170,6 +170,10 @@ public partial class Index : IAsyncDisposable
     private TimeSpan _currentTurnElapsed;
     private bool _disposed;
 
+    // 詰み手順追加の重複防止用
+    private string? _lastAddedMatePv;
+    private int _lastAddedMateMoveIndex;
+
     protected override async Task OnInitializedAsync()
     {
         try {
@@ -425,9 +429,15 @@ public partial class Index : IAsyncDisposable
             this.EngineService.MateIn is not null &&
             !string.IsNullOrEmpty(this.EngineService.PrincipalVariation) &&
             this.GameService is { } gs) {
-            await gs.AddMateSequenceBranchAsync(
-                this.EngineService.PrincipalVariation,
-                gs.State.DisplayMoveIndex);
+            var pv = this.EngineService.PrincipalVariation;
+            var moveIndex = gs.State.DisplayMoveIndex;
+
+            // 同じ局面で同じPVは追加しない
+            if (pv != this._lastAddedMatePv || moveIndex != this._lastAddedMateMoveIndex) {
+                await gs.AddMateSequenceBranchAsync(pv, moveIndex);
+                this._lastAddedMatePv = pv;
+                this._lastAddedMateMoveIndex = moveIndex;
+            }
         }
 
         await this.InvokeAsync(this.StateHasChanged);
@@ -438,6 +448,9 @@ public partial class Index : IAsyncDisposable
         if (!this.ShowEvaluation || !this.EngineService.IsAvailable || this.GameService is not { } gs) {
             return;
         }
+
+        // 新しい分析開始時に詰み手順追加履歴をリセット
+        this._lastAddedMatePv = null;
 
         var state = gs.State;
         var (board, firstCaptured, secondCaptured, currentTurn) = state.IsReviewing
