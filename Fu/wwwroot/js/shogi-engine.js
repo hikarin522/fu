@@ -47,6 +47,12 @@
             // メッセージリスナーを設定
             yaneuraou.addMessageListener((line) => {
                 lastMessageTime = Date.now();
+
+                // bestmove受信時は自動でwatchdog停止
+                if (line.startsWith('bestmove')) {
+                    stopWatchdog();
+                }
+
                 dotNetReference?.invokeMethodAsync('OnEngineMessage', line);
             });
 
@@ -115,6 +121,12 @@
         if (!engine) {
             return false;
         }
+
+        // stopコマンド送信時はwatchdogを停止
+        if (command === 'stop') {
+            stopWatchdog();
+        }
+
         engine.postMessage(command);
         return true;
     }
