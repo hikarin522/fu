@@ -17,8 +17,8 @@ public class ShogiEngineService : IDisposable
     private readonly Subject<Unit> _evaluationUpdated = new();
     private readonly Dictionary<int, CandidateMove> _candidates = [];
     private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
-    private readonly IDisposable _subscriptions;
 
+    private CancellationTokenSource? _analysisCts;
     private int _newDepthCandidateCount;
     private int _lastMultiPv;
 
@@ -66,22 +66,21 @@ public class ShogiEngineService : IDisposable
         this._engine = engine;
         this._usiParser = usiParser;
         this._sfenConverter = sfenConverter;
-
-        // エンジンからのイベントを購読
-        this._subscriptions = Disposable.Combine(
-            this._engine.InfoReceived.Subscribe(this.HandleInfo),
-            this._engine.BestMoveReceived.Subscribe(this.HandleBestMove)
-        );
     }
 
     #region Initialization
 
     /// <summary>エンジンを初期化</summary>
-    public Task<bool> InitializeAsync() => this._engine.InitializeAsync();
+    public async Task<bool> InitializeAsync()
+    {
+        var engineId = await this._engine.InitializeAsync();
+        return engineId is not null;
+    }
 
     /// <summary>エンジンを再起動</summary>
     public async Task<bool> RestartAsync()
     {
+        await this.StopAnalysisAsync();
         this.ResetEvaluation();
         this._lastMultiPv = 0;
         return await this._engine.RestartAsync();
@@ -104,6 +103,9 @@ public class ShogiEngineService : IDisposable
         if (!this._engine.IsAvailable) {
             return;
         }
+
+        // 前回の分析を停止
+        await this.StopAnalysisAsync();
 
         var currentNode = moveTree.CurrentNode;
 
@@ -128,21 +130,45 @@ public class ShogiEngineService : IDisposable
 
         // MultiPV設定（変更時のみ）
         if (multiPv != this._lastMultiPv) {
-            await this._engine.SendCommandAsync($"setoption name MultiPV value {multiPv}");
+            await this._engine.SetOptionAsync("MultiPV", multiPv);
             this._lastMultiPv = multiPv;
         }
 
         // 分析開始
         var sfen = this._sfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
-        await this._engine.GoAsync(sfen, depth);
+        this._analysisCts = new CancellationTokenSource();
+
+        // バックグラウンドでストリームを処理
+        _ = this.ProcessAnalysisStreamAsync(sfen, depth, this._analysisCts.Token);
+    }
+
+    private async Task ProcessAnalysisStreamAsync(string sfen, int depth, CancellationToken cancellationToken)
+    {
+        try {
+            await foreach (var result in this._engine.GoAsync(sfen, depth).WithCancellation(cancellationToken)) {
+                switch (result) {
+                    case UsiGoResult.Info info:
+                        this.HandleInfo(info.Value);
+                        break;
+
+                    case UsiGoResult.BestMove bestMove:
+                        this.HandleBestMove(bestMove.Value);
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException) {
+            // キャンセルは正常終了
+        }
     }
 
     /// <summary>分析を停止</summary>
     public async Task StopAnalysisAsync()
     {
-        var bestMove = await this._engine.StopAsync();
-        if (bestMove is not null) {
-            this.HandleBestMove(bestMove);
+        if (this._analysisCts is not null) {
+            await this._analysisCts.CancelAsync();
+            this._analysisCts.Dispose();
+            this._analysisCts = null;
         }
     }
 
@@ -327,7 +353,8 @@ public class ShogiEngineService : IDisposable
 
     public void Dispose()
     {
-        this._subscriptions.Dispose();
+        this._analysisCts?.Cancel();
+        this._analysisCts?.Dispose();
         this._evaluationUpdated.Dispose();
         GC.SuppressFinalize(this);
     }

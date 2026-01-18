@@ -1,5 +1,5 @@
 // YaneuraOu WASM Engine wrapper for Blazor
-// WebWorkerでエンジンを実行し、メインスレッドのブロックを防ぐ
+// 純粋な転送層 - WebWorkerとC#間のメッセージを中継するだけ
 (() => {
     'use strict';
 
@@ -36,6 +36,7 @@
 
                 switch (type) {
                     case 'message':
+                        // エンジンからのメッセージをそのままC#に転送
                         dotNetReference?.invokeMethodAsync('OnEngineMessage', data);
                         break;
 
@@ -107,28 +108,6 @@
     }
 
     /**
-     * 局面の評価をリクエスト
-     */
-    function requestEvaluation(sfen, depth) {
-        if (!worker || !isReady) {
-            return false;
-        }
-        worker.postMessage({ type: 'evaluate', data: { sfen, depth } });
-        return true;
-    }
-
-    /**
-     * 探索を停止
-     */
-    function stop() {
-        if (!worker || !isReady) {
-            return false;
-        }
-        worker.postMessage({ type: 'stop' });
-        return true;
-    }
-
-    /**
      * Cross-Origin Isolationが有効か確認
      */
     function isCrossOriginIsolated() {
@@ -141,8 +120,6 @@
         restart,
         setCallback,
         sendCommand,
-        requestEvaluation,
-        stop,
         isCrossOriginIsolated
     };
 })();
