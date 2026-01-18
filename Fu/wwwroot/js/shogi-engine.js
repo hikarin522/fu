@@ -1,124 +1,133 @@
 // YaneuraOu WASM Engine wrapper for Blazor
-let engine = null;
-let engineReady = false;
-let dotNetReference = null;
+(() => {
+    'use strict';
 
-// Initialize the engine
-async function initShogiEngine() {
-    if (engine) {
-        return engineReady;
+    let engine = null;
+    let dotNetReference = null;
+
+    /**
+     * エンジンを初期化し、USIハンドシェイクを完了する
+     * @returns {Promise<boolean>} 初期化成功時true
+     */
+    async function init() {
+        if (engine) {
+            return true;
+        }
+
+        try {
+            // YaneuraOuスクリプトを動的ロード
+            await loadScript('lib/yaneuraou/yaneuraou.js');
+
+            // WASMモジュールを初期化
+            const yaneuraou = await YaneuraOu({
+                locateFile: (path) => `lib/yaneuraou/${path}`
+            });
+
+            // メッセージリスナーを設定
+            yaneuraou.addMessageListener((line) => {
+                dotNetReference?.invokeMethodAsync('OnEngineMessage', line);
+            });
+
+            engine = yaneuraou;
+
+            // USIハンドシェイク（usiok待機）
+            await waitForMessage('usiok', () => engine.postMessage('usi'));
+
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize shogi engine:', error);
+            return false;
+        }
     }
 
-    try {
-        // Load YaneuraOu from local lib
-        const script = document.createElement('script');
-        script.src = 'lib/yaneuraou/yaneuraou.js';
-        document.head.appendChild(script);
-
-        await new Promise((resolve, reject) => {
+    /**
+     * スクリプトを動的にロード
+     */
+    function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
             script.onload = resolve;
             script.onerror = reject;
+            document.head.appendChild(script);
         });
+    }
 
-        // YaneuraOu is a factory function that returns a module instance
-        // Configure locateFile to find .wasm and .data files in the correct directory
-        const yaneuraou = await YaneuraOu({
-            locateFile: (path) => `lib/yaneuraou/${path}`
-        });
-
-        // Set up message listener
-        yaneuraou.addMessageListener((line) => {
-            console.log('Engine:', line);
-            if (dotNetReference) {
-                dotNetReference.invokeMethodAsync('OnEngineMessage', line);
-            }
-        });
-
-        // エンジンを先に設定
-        engine = yaneuraou;
-        engineReady = true;
-        console.log('YaneuraOu engine initialized');
-
-        // USI初期化とusiok待機
-        await new Promise((resolve) => {
+    /**
+     * 特定のメッセージを待機
+     */
+    function waitForMessage(expected, sendCommand) {
+        return new Promise((resolve) => {
             const handler = (line) => {
-                if (line === 'usiok') {
-                    yaneuraou.removeMessageListener(handler);
+                if (line === expected) {
+                    engine.removeMessageListener(handler);
                     resolve();
                 }
             };
-            yaneuraou.addMessageListener(handler);
-            yaneuraou.postMessage('usi');
+            engine.addMessageListener(handler);
+            sendCommand();
         });
-
-        console.log('USI handshake complete');
-        return true;
-    } catch (error) {
-        console.error('Failed to initialize shogi engine:', error);
-        return false;
     }
-}
 
-// Set the .NET reference for callbacks
-function setEngineCallback(dotNetRef) {
-    dotNetReference = dotNetRef;
-}
+    /**
+     * .NETコールバック参照を設定
+     */
+    function setCallback(dotNetRef) {
+        dotNetReference = dotNetRef;
+    }
 
-// Send a command to the engine
-function sendEngineCommand(command) {
-    if (engine && engineReady) {
-        console.log('Sending to engine:', command);
+    /**
+     * エンジンにコマンドを送信
+     */
+    function sendCommand(command) {
+        if (!engine) {
+            return false;
+        }
         engine.postMessage(command);
         return true;
     }
-    return false;
-}
 
-// Request evaluation for a position
-// depth: null or 0 = infinite search, positive number = depth limit
-function requestEvaluation(sfen, depth) {
-    if (!engine || !engineReady) {
-        console.warn('Engine not ready');
-        return false;
+    /**
+     * 局面の評価をリクエスト
+     * stop → position → go を一括実行
+     */
+    function requestEvaluation(sfen, depth) {
+        if (!engine) {
+            return false;
+        }
+
+        engine.postMessage('stop');
+        engine.postMessage('position sfen ' + sfen);
+        engine.postMessage(depth > 0 ? `go depth ${depth}` : 'go infinite');
+
+        return true;
     }
 
-    // Stop any ongoing search
-    engine.postMessage('stop');
-
-    // Set position
-    engine.postMessage('position sfen ' + sfen);
-
-    // Start search
-    if (depth && depth > 0) {
-        engine.postMessage('go depth ' + depth);
-    } else {
-        // Infinite search until stopped
-        engine.postMessage('go infinite');
-    }
-
-    return true;
-}
-
-// Stop the current search
-function stopEngine() {
-    if (engine && engineReady) {
+    /**
+     * 探索を停止
+     */
+    function stop() {
+        if (!engine) {
+            return false;
+        }
         engine.postMessage('stop');
         return true;
     }
-    return false;
-}
 
-// Check if the page is cross-origin isolated
-function isCrossOriginIsolated() {
-    return window.crossOriginIsolated === true;
-}
+    /**
+     * Cross-Origin Isolationが有効か確認
+     */
+    function isCrossOriginIsolated() {
+        return window.crossOriginIsolated === true;
+    }
 
-// Export functions for Blazor
-window.ShogiEngine = {
-    init: initShogiEngine,
-    setCallback: setEngineCallback,
-    sendCommand: sendEngineCommand,
-    requestEvaluation: requestEvaluation,
-    stop: stopEngine,
-    isCrossOriginIsolated: isCrossOriginIsolated
-};
+    // Blazor用にエクスポート
+    window.ShogiEngine = {
+        init,
+        setCallback,
+        sendCommand,
+        requestEvaluation,
+        stop,
+        isCrossOriginIsolated
+    };
+})();

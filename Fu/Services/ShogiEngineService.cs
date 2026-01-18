@@ -17,25 +17,28 @@ public class ShogiEngineService : IAsyncDisposable
     private readonly IUsiParser _usiParser;
     private readonly ISfenConverter _sfenConverter;
     private readonly Subject<Unit> _evaluationUpdated = new();
-    private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
-    private bool _initialized;
-    private bool _isAnalyzing;
-    private bool _isReady; // readyok受信後にtrue
-    private TaskCompletionSource? _readyTcs; // readyok待機用
     private readonly Dictionary<int, CandidateMove> _candidates = [];
     private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
+
+    private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
+    private TaskCompletionSource? _readyTcs;
+    private bool _initialized;
+    private bool _isReady;
+    private bool _isAnalyzing;
     private int _newDepthCandidateCount;
     private int _lastMultiPv;
 
     // 現在分析中のノード情報
     private MoveTree? _currentMoveTree;
-    private MoveNode? _currentNode; // nullは開始局面
+    private MoveNode? _currentNode;
     private Turn _currentTurn = Turn.First;
 
-    // 最後に分析を開始したノード（結果が遅延して届いた時にキャッシュ更新に使用）
+    // 最後に分析を開始したノード（遅延結果のキャッシュ更新用）
     private MoveTree? _lastAnalyzedMoveTree;
     private MoveNode? _lastAnalyzedNode;
     private Turn _lastAnalyzedTurn;
+
+    #region Public Properties
 
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
@@ -55,11 +58,7 @@ public class ShogiEngineService : IAsyncDisposable
     /// <summary>探索深さ</summary>
     public int Depth { get; private set; }
 
-    /// <summary>候補手リスト（MultiPV）</summary>
-    /// <remarks>
-    /// 深さが増えた直後で候補手が揃っていない場合、前の深さの候補手で補完する。
-    /// 例: 深さ32で1位のみの場合、前の深さの1位→2位、2位→3位として表示。
-    /// </remarks>
+    /// <summary>候補手リスト（MultiPV、前の深さで補完）</summary>
     public IReadOnlyList<CandidateMove> Candidates => this.GetMergedCandidates();
 
     /// <summary>エンジンが利用可能か</summary>
@@ -71,12 +70,16 @@ public class ShogiEngineService : IAsyncDisposable
     /// <summary>評価値が更新された時</summary>
     public Observable<Unit> EvaluationUpdated => this._evaluationUpdated;
 
+    #endregion
+
     public ShogiEngineService(IJSRuntime jsRuntime, IUsiParser usiParser, ISfenConverter sfenConverter)
     {
         this._jsRuntime = jsRuntime;
         this._usiParser = usiParser;
         this._sfenConverter = sfenConverter;
     }
+
+    #region Initialization
 
     /// <summary>エンジンを初期化</summary>
     public async Task<bool> InitializeAsync()
@@ -85,65 +88,50 @@ public class ShogiEngineService : IAsyncDisposable
             return this.IsAvailable;
         }
 
+        this._initialized = true;
+
         try {
-            // SharedArrayBufferが利用可能か確認
-            var isCrossOriginIsolated = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.isCrossOriginIsolated");
-            if (!isCrossOriginIsolated) {
-                Console.WriteLine("Cross-origin isolation is not enabled. Engine will not be available.");
-                this._initialized = true;
-                this.IsAvailable = false;
-                return false;
+            // Cross-Origin Isolation確認（SharedArrayBufferに必要）
+            if (!await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.isCrossOriginIsolated")) {
+                return this.IsAvailable = false;
             }
 
-            this._dotNetRef = DotNetObjectReference.Create(this);
-
-            // エンジン初期化（JSで usi コマンドも送信される）
-            var success = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init");
-            if (!success) {
-                this._initialized = true;
-                this.IsAvailable = false;
-                return false;
+            // エンジン初期化（JSでUSIハンドシェイク完了まで待機）
+            if (!await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init")) {
+                return this.IsAvailable = false;
             }
 
             // コールバック設定
+            this._dotNetRef = DotNetObjectReference.Create(this);
             await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
 
-            this._initialized = true;
             this.IsAvailable = true;
 
             // readyok待機
             this._readyTcs = new TaskCompletionSource();
-            await this.SendCommandAsync("isready");
+            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "isready");
 
-            // readyokを最大5秒待機
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             try {
                 await this._readyTcs.Task.WaitAsync(cts.Token);
                 this._isReady = true;
-                Console.WriteLine("Engine is ready");
             }
             catch (OperationCanceledException) {
-                Console.WriteLine("Engine readyok timeout");
-                this.IsAvailable = false;
-                return false;
+                return this.IsAvailable = false;
             }
 
             return true;
         }
-        catch (Exception ex) {
-            Console.WriteLine($"Failed to initialize engine: {ex.Message}");
-            this._initialized = true;
-            this.IsAvailable = false;
-            return false;
+        catch {
+            return this.IsAvailable = false;
         }
     }
 
-    /// <summary>エンジンにコマンドを送信</summary>
-    private async Task<bool> SendCommandAsync(string command) =>
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", command);
+    #endregion
 
-    /// <summary>局面を分析（MoveTreeベース）</summary>
-    /// <param name="depth">探索深さ（0 = 無限探索）</param>
+    #region Analysis
+
+    /// <summary>局面を分析</summary>
     public async Task AnalyzePositionAsync(
         Board board,
         Turn currentTurn,
@@ -159,58 +147,190 @@ public class ShogiEngineService : IAsyncDisposable
 
         var currentNode = moveTree.CurrentNode;
 
-        // 現在のノードと最後に分析したノードを記録
+        // ノード情報を記録
         this._currentMoveTree = moveTree;
         this._currentNode = currentNode;
         this._currentTurn = currentTurn;
-
         this._lastAnalyzedMoveTree = moveTree;
         this._lastAnalyzedNode = currentNode;
         this._lastAnalyzedTurn = currentTurn;
 
-        // ノードのキャッシュをチェック
-        var cached = GetCachedEvaluationFromNode(moveTree, currentNode);
+        // キャッシュをチェック
+        var cached = GetCachedEvaluation(moveTree, currentNode);
         if (cached is not null) {
-            // キャッシュから復元（即座に表示）
             this.RestoreFromCache(cached);
             this._evaluationUpdated.OnNext(Unit.Default);
-            // 無限探索の場合は継続、深さ指定の場合はキャッシュ深さ以上ならスキップ
+
             if (depth > 0 && cached.Depth >= depth) {
                 return;
             }
-            // 継続して分析する場合、キャッシュの深さから継続（新しい結果は上書きされる）
         }
         else {
-            // 新規局面は初期化
-            this._candidates.Clear();
-            this.Depth = 0;
-            this.Evaluation = null;
-            this.MateIn = null;
-            this.BestMove = null;
-            this.PrincipalVariation = null;
+            this.ResetEvaluation();
         }
 
         this._isAnalyzing = true;
 
-        // MultiPVを設定（値が変わった時のみ送信）
+        // MultiPV設定（変更時のみ）
         if (multiPv != this._lastMultiPv) {
-            await this.SendCommandAsync($"setoption name MultiPV value {multiPv}");
+            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
             this._lastMultiPv = multiPv;
         }
 
-        // SFEN生成してエンジンに送信
+        // 分析開始
         var sfen = this._sfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
-
-        // JS側でstop→position→goを一括実行（メインスレッドブロッキング回避）
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
     }
 
-    /// <summary>ノードからキャッシュを取得</summary>
-    private static CachedEvaluation? GetCachedEvaluationFromNode(MoveTree moveTree, MoveNode? node) =>
+    /// <summary>分析を停止</summary>
+    public async Task StopAnalysisAsync()
+    {
+        if (!this.IsAvailable) {
+            return;
+        }
+
+        this._isAnalyzing = false;
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
+    }
+
+    private void ResetEvaluation()
+    {
+        this._candidates.Clear();
+        this.Depth = 0;
+        this.Evaluation = null;
+        this.MateIn = null;
+        this.BestMove = null;
+        this.PrincipalVariation = null;
+    }
+
+    #endregion
+
+    #region Message Handling
+
+    /// <summary>エンジンからのメッセージを処理</summary>
+    [JSInvokable]
+    public Task OnEngineMessage(string message)
+    {
+        if (message == "readyok") {
+            this._readyTcs?.TrySetResult();
+            return Task.CompletedTask;
+        }
+
+        if (!this._isReady) {
+            return Task.CompletedTask;
+        }
+
+        if (message.StartsWith("info ", StringComparison.Ordinal)) {
+            if (this.ParseInfoMessage(message)) {
+                this._evaluationUpdated.OnNext(Unit.Default);
+            }
+        }
+        else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
+            this.HandleBestMove(message);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void HandleBestMove(string message)
+    {
+        var parts = message.Split(' ');
+        if (parts.Length >= 2) {
+            this.BestMove = parts[1];
+        }
+
+        this._isAnalyzing = false;
+        this.SaveToCurrentNode();
+        this._evaluationUpdated.OnNext(Unit.Default);
+    }
+
+    /// <summary>infoメッセージをパース</summary>
+    /// <returns>UIを更新すべき場合true</returns>
+    private bool ParseInfoMessage(string message)
+    {
+        var info = ParseUsiInfo(message.Split(' '));
+
+        // 現在の局面かチェック
+        var isCurrentPosition = this._currentMoveTree is not null
+            && ReferenceEquals(this._lastAnalyzedMoveTree, this._currentMoveTree)
+            && ReferenceEquals(this._lastAnalyzedNode, this._currentNode);
+
+        if (!isCurrentPosition) {
+            this.UpdateCacheOnly(info);
+            return false;
+        }
+
+        var isNewDepth = info.Depth.HasValue && info.Depth.Value > this.Depth;
+        var hasMate = info.MateIn.HasValue && this.MateIn is null;
+
+        // 詰み検出後はcpスコアで上書きしない
+        if (this.MateIn.HasValue && !info.MateIn.HasValue) {
+            return false;
+        }
+
+        // 評価値を先手視点に正規化
+        var normalizedScore = this._currentTurn == Turn.Second ? -info.Score : info.Score;
+        var normalizedMate = this._currentTurn == Turn.Second ? -info.MateIn : info.MateIn;
+
+        // メイン評価値を更新
+        if ((info.MultiPv is null or 1) && (isNewDepth || hasMate)) {
+            this.UpdateMainEvaluation(info, normalizedScore, isNewDepth, hasMate);
+        }
+
+        // 候補手を更新
+        if (info.MultiPv.HasValue && info.Move is not null && info.Depth.HasValue && info.Depth.Value >= this.Depth) {
+            this._candidates[info.MultiPv.Value] = new CandidateMove(
+                info.MultiPv.Value,
+                info.Move,
+                normalizedScore,
+                normalizedMate,
+                info.Pv
+            );
+            this._newDepthCandidateCount = this._candidates.Count;
+        }
+
+        return isNewDepth || hasMate;
+    }
+
+    private void UpdateMainEvaluation(UsiInfo info, int? normalizedScore, bool isNewDepth, bool hasMate)
+    {
+        if (isNewDepth) {
+            this.Depth = info.Depth!.Value;
+
+            // 前の候補手を保存してクリア
+            this._previousCandidates.Clear();
+            foreach (var kvp in this._candidates) {
+                this._previousCandidates[kvp.Key] = kvp.Value;
+            }
+            this._candidates.Clear();
+            this._newDepthCandidateCount = 0;
+        }
+
+        if (normalizedScore.HasValue) {
+            this.Evaluation = normalizedScore.Value;
+        }
+
+        if (info.MateIn.HasValue) {
+            this.MateIn = info.MateIn.Value;
+            this.MateTurn = this._currentTurn;
+        }
+        else if (isNewDepth) {
+            this.MateIn = null;
+        }
+
+        if (info.Pv is not null) {
+            this.PrincipalVariation = info.Pv;
+        }
+    }
+
+    #endregion
+
+    #region Cache
+
+    private static CachedEvaluation? GetCachedEvaluation(MoveTree moveTree, MoveNode? node) =>
         node is not null ? node.CachedEvaluation : moveTree.RootEvaluation;
 
-    /// <summary>ノードにキャッシュを保存</summary>
-    private static void SetCachedEvaluationToNode(MoveTree moveTree, MoveNode? node, CachedEvaluation cached)
+    private static void SetCachedEvaluation(MoveTree moveTree, MoveNode? node, CachedEvaluation cached)
     {
         if (node is not null) {
             node.CachedEvaluation = cached;
@@ -228,6 +348,7 @@ public class ShogiEngineService : IAsyncDisposable
         this.BestMove = cached.BestMove;
         this.PrincipalVariation = cached.PrincipalVariation;
         this.Depth = cached.Depth;
+
         this._candidates.Clear();
         foreach (var candidate in cached.Candidates) {
             this._candidates[candidate.Rank] = candidate;
@@ -250,237 +371,49 @@ public class ShogiEngineService : IAsyncDisposable
             this.Candidates
         );
 
-        SetCachedEvaluationToNode(this._currentMoveTree, this._currentNode, cached);
+        SetCachedEvaluation(this._currentMoveTree, this._currentNode, cached);
     }
 
-    /// <summary>分析を停止</summary>
-    public async Task StopAnalysisAsync()
+    private void UpdateCacheOnly(UsiInfo info)
     {
-        if (!this.IsAvailable) {
-            return;
-        }
-
-        this._isAnalyzing = false;
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
-    }
-
-    /// <summary>エンジンからのメッセージを処理</summary>
-    [JSInvokable]
-    public Task OnEngineMessage(string message)
-    {
-        // readyokを受信したら初期化完了
-        if (message == "readyok") {
-            this._readyTcs?.TrySetResult();
-            return Task.CompletedTask;
-        }
-
-        // 準備完了前のメッセージは無視（usiok等）
-        if (!this._isReady) {
-            return Task.CompletedTask;
-        }
-
-        // USIプロトコルのメッセージをパース
-        if (message.StartsWith("info ", StringComparison.Ordinal)) {
-            // ParseInfoMessageは意味のある変更があった場合のみtrueを返す
-            if (this.ParseInfoMessage(message)) {
-                this._evaluationUpdated.OnNext(Unit.Default);
-            }
-        }
-        else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
-            var parts = message.Split(' ');
-            if (parts.Length >= 2) {
-                this.BestMove = parts[1];
-            }
-            this._isAnalyzing = false;
-
-            // 探索完了時にキャッシュに保存
-            this.SaveToCurrentNode();
-
-            this._evaluationUpdated.OnNext(Unit.Default);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// infoメッセージをパースして状態を更新
-    /// </summary>
-    /// <returns>UIを更新すべき意味のある変更があった場合はtrue</returns>
-    private bool ParseInfoMessage(string message)
-    {
-        var parts = message.Split(' ');
-        var info = ParseUsiInfo(parts);
-
-        // 現在の局面の結果かどうか判定（同じノードかどうか）
-        var isCurrentPosition = this._currentMoveTree is not null
-            && ReferenceEquals(this._lastAnalyzedMoveTree, this._currentMoveTree)
-            && ReferenceEquals(this._lastAnalyzedNode, this._currentNode);
-
-        if (!isCurrentPosition) {
-            // 現在の局面ではない場合、最後に分析したノードのキャッシュを更新（UI更新はしない）
-            this.UpdateCacheOnly(info);
-            return false;
-        }
-
-        // 深さがない、または現在より深い場合のみメイン評価値を更新
-        var isNewDepth = info.Depth.HasValue && info.Depth.Value > this.Depth;
-        // ただし、詰みが検出された場合は深さに関係なく更新（キャッシュから復元した場合も詰みを優先）
-        var hasMate = info.MateIn.HasValue && this.MateIn is null;
-
-        // 既に詰みが検出されている場合、cp スコアでは上書きしない
-        // （詰み検出後の別分析結果で詰みが消えることを防ぐ）
-        if (this.MateIn.HasValue && !info.MateIn.HasValue) {
-            return false;
-        }
-
-        // 評価値を先手視点に変換
-        // エンジンは分析対象局面の手番側目線でスコアを返す
-        // - 先手番の局面を分析 → 先手目線のスコア → 変換不要
-        // - 後手番の局面を分析 → 後手目線のスコア → 符号反転で先手視点に変換
-        // ※プレイヤーが誰か（先手側/後手側）は関係なく、分析対象の局面の手番で決まる
-        var normalizedScore = this._currentTurn == Turn.Second ? -info.Score : info.Score;
-
-        // デバッグ用：変換前後の値をログ出力
-        if (info.Score.HasValue) {
-            Console.WriteLine($"[Eval] Turn={this._currentTurn}, Raw={info.Score}, Normalized={normalizedScore}, Depth={info.Depth}");
-        }
-
-        // メインの評価値を更新（multipv=1または指定なしの場合、かつ新しい深さの場合または詰みが見つかった場合）
-        if ((info.MultiPv is null or 1) && (isNewDepth || hasMate)) {
-            if (isNewDepth) {
-                this.Depth = info.Depth!.Value;
-            }
-            if (normalizedScore.HasValue) {
-                this.Evaluation = normalizedScore.Value;
-            }
-
-            // 詰みは手番視点でそのまま保存
-            if (info.MateIn.HasValue) {
-                this.MateIn = info.MateIn.Value;
-                this.MateTurn = this._currentTurn;
-            }
-            else if (isNewDepth) {
-                // 新しい深さで詰みがない場合のみリセット
-                this.MateIn = null;
-            }
-
-            if (info.Pv is not null) {
-                this.PrincipalVariation = info.Pv;
-            }
-
-            // 新しい深さになったら前の候補手を保存してからクリア
-            if (isNewDepth) {
-                this._previousCandidates.Clear();
-                foreach (var kvp in this._candidates) {
-                    this._previousCandidates[kvp.Key] = kvp.Value;
-                }
-                this._candidates.Clear();
-                this._newDepthCandidateCount = 0;
-            }
-        }
-
-        // 候補手リストを更新（現在の深さ以上の結果のみ）
-        // 候補手の詰みも手番視点で正規化（正=手番側勝ち → 先手視点に変換）
-        var normalizedMate = this._currentTurn == Turn.Second ? -info.MateIn : info.MateIn;
-        if (info.MultiPv.HasValue && info.Move is not null && info.Depth.HasValue && info.Depth.Value >= this.Depth) {
-            this._candidates[info.MultiPv.Value] = new CandidateMove(
-                info.MultiPv.Value,
-                info.Move,
-                normalizedScore,
-                normalizedMate,
-                info.Pv
-            );
-            this._newDepthCandidateCount = this._candidates.Count;
-        }
-
-        // 深さが増加した場合、または詰みを検出した場合のみUIを更新
-        return isNewDepth || hasMate;
-    }
-
-    /// <summary>過去の局面の解析結果をキャッシュに反映（UI更新なし）</summary>
-    private void UpdateCacheOnly((int? MultiPv, int? Depth, int? Score, int? MateIn, string? Pv, string? Move) info)
-    {
-        // 深さ情報がない、multipv=1以外の場合、または最後に分析した局面がない場合は無視
         if (!info.Depth.HasValue || (info.MultiPv.HasValue && info.MultiPv.Value != 1) || this._lastAnalyzedMoveTree is null) {
             return;
         }
 
-        var moveTree = this._lastAnalyzedMoveTree;
-        var node = this._lastAnalyzedNode;
-        var turn = this._lastAnalyzedTurn;
-
-        // キャッシュが存在し、より深い結果であれば更新
-        var cached = GetCachedEvaluationFromNode(moveTree, node);
-        if (cached is not null && info.Depth.Value > cached.Depth) {
-            var normalizedScore = turn == Turn.Second ? -info.Score : info.Score;
-            var normalizedMate = turn == Turn.Second ? -info.MateIn : info.MateIn;
-
-            var newCached = new CachedEvaluation(
-                normalizedScore ?? cached.Evaluation,
-                normalizedMate ?? cached.MateIn,
-                cached.MateTurn,
-                info.Move ?? cached.BestMove,
-                info.Pv ?? cached.PrincipalVariation,
-                info.Depth.Value,
-                cached.Candidates // 候補手は維持
-            );
-
-            SetCachedEvaluationToNode(moveTree, node, newCached);
-
-            Console.WriteLine($"[Cache] Updated cache for old position: depth={info.Depth}, node={node?.Depth ?? 0}");
+        var cached = GetCachedEvaluation(this._lastAnalyzedMoveTree, this._lastAnalyzedNode);
+        if (cached is null || info.Depth.Value <= cached.Depth) {
+            return;
         }
+
+        var normalizedScore = this._lastAnalyzedTurn == Turn.Second ? -info.Score : info.Score;
+        var normalizedMate = this._lastAnalyzedTurn == Turn.Second ? -info.MateIn : info.MateIn;
+
+        var newCached = new CachedEvaluation(
+            normalizedScore ?? cached.Evaluation,
+            normalizedMate ?? cached.MateIn,
+            cached.MateTurn,
+            info.Move ?? cached.BestMove,
+            info.Pv ?? cached.PrincipalVariation,
+            info.Depth.Value,
+            cached.Candidates
+        );
+
+        SetCachedEvaluation(this._lastAnalyzedMoveTree, this._lastAnalyzedNode, newCached);
     }
 
-    private static (int? MultiPv, int? Depth, int? Score, int? MateIn, string? Pv, string? Move) ParseUsiInfo(string[] parts)
-    {
-        int? multipv = null, depth = null, score = null, mateIn = null;
-        string? pv = null, move = null;
+    #endregion
 
-        for (var i = 0; i < parts.Length; i++) {
-            switch (parts[i]) {
-                case "multipv" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var mpv):
-                    multipv = mpv;
-                    break;
-                case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var d):
-                    depth = d;
-                    break;
-                case "score" when i + 2 < parts.Length:
-                    if (parts[i + 1] == "cp" && int.TryParse(parts[i + 2], out var cp)) {
-                        score = cp;
-                    }
-                    else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
-                        score = mate > 0 ? EvaluationConstants.MateScoreBase - mate : -EvaluationConstants.MateScoreBase - mate;
-                        mateIn = mate;
-                    }
-                    break;
-                case "pv" when i + 1 < parts.Length:
-                    var pvParts = parts.Skip(i + 1).ToArray();
-                    pv = string.Join(" ", pvParts);
-                    if (pvParts.Length > 0) {
-                        move = pvParts[0];
-                    }
-                    break;
-            }
-        }
-        return (multipv, depth, score, mateIn, pv, move);
-    }
+    #region Candidates
 
-    /// <summary>候補手リストを取得（前の深さの結果で補完）</summary>
     private List<CandidateMove> GetMergedCandidates()
     {
-        var result = new List<CandidateMove>();
+        var result = this._candidates.Values.OrderBy(c => c.Rank).ToList();
 
-        // 現在の深さの候補手を追加
-        foreach (var candidate in this._candidates.Values.OrderBy(c => c.Rank)) {
-            result.Add(candidate);
-        }
-
-        // 前の深さの候補手で補完（新しい深さで取得済みの数だけシフト）
+        // 前の深さの候補手で補完
         if (this._previousCandidates.Count > 0 && this._newDepthCandidateCount > 0) {
             var shift = this._newDepthCandidateCount;
             foreach (var prev in this._previousCandidates.Values.OrderBy(c => c.Rank)) {
                 var newRank = prev.Rank + shift;
-                // 既に現在の深さで同じランクがある場合はスキップ
                 if (!this._candidates.ContainsKey(newRank)) {
                     result.Add(prev with { Rank = newRank });
                 }
@@ -490,9 +423,55 @@ public class ShogiEngineService : IAsyncDisposable
         return [.. result.OrderBy(c => c.Rank)];
     }
 
-    /// <summary>SFEN形式の指し手をパースして移動元・移動先の座標を返す</summary>
+    #endregion
+
+    #region USI Parsing
+
+    private record struct UsiInfo(int? MultiPv, int? Depth, int? Score, int? MateIn, string? Pv, string? Move);
+
+    private static UsiInfo ParseUsiInfo(string[] parts)
+    {
+        int? multipv = null, depth = null, score = null, mateIn = null;
+        string? pv = null, move = null;
+
+        for (var i = 0; i < parts.Length; i++) {
+            switch (parts[i]) {
+                case "multipv" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var mpv):
+                    multipv = mpv;
+                    break;
+
+                case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var d):
+                    depth = d;
+                    break;
+
+                case "score" when i + 2 < parts.Length:
+                    if (parts[i + 1] == "cp" && int.TryParse(parts[i + 2], out var cp)) {
+                        score = cp;
+                    }
+                    else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
+                        score = mate > 0 ? EvaluationConstants.MateScoreBase - mate : -EvaluationConstants.MateScoreBase - mate;
+                        mateIn = mate;
+                    }
+                    break;
+
+                case "pv" when i + 1 < parts.Length:
+                    var pvParts = parts.Skip(i + 1).ToArray();
+                    pv = string.Join(" ", pvParts);
+                    if (pvParts.Length > 0) {
+                        move = pvParts[0];
+                    }
+                    break;
+            }
+        }
+
+        return new UsiInfo(multipv, depth, score, mateIn, pv, move);
+    }
+
+    /// <summary>SFEN形式の指し手をパース</summary>
     public ((int col, int row)? from, (int col, int row) destination, char? dropPiece)? ParseSfenMove(string sfenMove) =>
         this._usiParser.ParseMoveCoordinates(sfenMove);
+
+    #endregion
 
     public async ValueTask DisposeAsync()
     {
