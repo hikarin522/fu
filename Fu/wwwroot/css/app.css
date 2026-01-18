@@ -1240,6 +1240,11 @@ a, .btn-link {
     flex-direction: column;
     overflow: hidden;
     resize: both;
+    direction: rtl;
+}
+
+.move-history > * {
+    direction: ltr;
 }
 
 .move-history-header {
