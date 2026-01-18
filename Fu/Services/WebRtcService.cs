@@ -296,16 +296,6 @@ public class WebRtcService : IGameTransport
     }
 
     [JSInvokable]
-    [Obsolete("Use OnParticipantLeftCallback(peerId, wasHost) instead")]
-    public Task OnBecameHostCallback()
-    {
-        // JS側からの直接呼び出し用（後方互換）
-        this.IsHost = true;
-        this._becameHost.Publish(new TransportBecameHostEvent());
-        return Task.CompletedTask;
-    }
-
-    [JSInvokable]
     public Task OnHostStatusChanged(bool newIsHost)
     {
         this.IsHost = newIsHost;

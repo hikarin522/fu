@@ -38,6 +38,13 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
         this._jsRuntime = jsRuntime;
     }
 
+    private async Task SetupCallbackAsync()
+    {
+        this._dotNetRef?.Dispose();
+        this._dotNetRef = DotNetObjectReference.Create(this);
+        await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
+    }
+
     #region Lifecycle
 
     public async Task<UsiEngineId?> InitializeAsync()
@@ -75,10 +82,7 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
                 return this.IsAvailable = false;
             }
 
-            // コールバック再設定
-            this._dotNetRef?.Dispose();
-            this._dotNetRef = DotNetObjectReference.Create(this);
-            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
+            await this.SetupCallbackAsync();
 
             // USIハンドシェイクをやり直す
             var engineId = await this.PerformUsiHandshakeAsync();
@@ -117,10 +121,7 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
             return null;
         }
 
-        // コールバック設定
-        this._dotNetRef = DotNetObjectReference.Create(this);
-        await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
-
+        await this.SetupCallbackAsync();
         this.IsAvailable = true;
 
         // USIハンドシェイク（C#側で実行）

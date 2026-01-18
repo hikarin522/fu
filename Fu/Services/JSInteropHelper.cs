@@ -11,10 +11,10 @@ public static class JSInteropHelper
     public static async ValueTask<T?> InvokeSafeAsync<T>(
         this IJSRuntime js,
         string identifier,
-        object? arg0)
+        params object?[] args)
     {
         try {
-            return await js.InvokeAsync<T>(identifier, arg0);
+            return await js.InvokeAsync<T>(identifier, args);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
@@ -22,25 +22,6 @@ public static class JSInteropHelper
         }
         catch (TaskCanceledException) {
             // 画面遷移時などのキャンセルは無視
-            return default;
-        }
-    }
-
-    /// <summary>戻り値ありのJS呼び出し（エラー時はデフォルト値を返す、引数2つ）</summary>
-    public static async ValueTask<T?> InvokeSafeAsync<T>(
-        this IJSRuntime js,
-        string identifier,
-        object? arg0,
-        object? arg1)
-    {
-        try {
-            return await js.InvokeAsync<T>(identifier, arg0, arg1);
-        }
-        catch (JSException ex) {
-            LogError(identifier, ex);
-            return default;
-        }
-        catch (TaskCanceledException) {
             return default;
         }
     }
@@ -49,28 +30,10 @@ public static class JSInteropHelper
     public static async ValueTask InvokeVoidSafeAsync(
         this IJSRuntime js,
         string identifier,
-        object? arg0)
+        params object?[] args)
     {
         try {
-            await js.InvokeVoidAsync(identifier, arg0);
-        }
-        catch (JSException ex) {
-            LogError(identifier, ex);
-        }
-        catch (TaskCanceledException) {
-            // 画面遷移時などのキャンセルは無視
-        }
-    }
-
-    /// <summary>戻り値なしのJS呼び出し（エラー時はログ出力のみ、引数2つ）</summary>
-    public static async ValueTask InvokeVoidSafeAsync(
-        this IJSRuntime js,
-        string identifier,
-        object? arg0,
-        object? arg1)
-    {
-        try {
-            await js.InvokeVoidAsync(identifier, arg0, arg1);
+            await js.InvokeVoidAsync(identifier, args);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
