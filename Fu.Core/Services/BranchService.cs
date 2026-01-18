@@ -162,8 +162,8 @@ public class BranchService : IBranchService
             tempTurn = tempTurn.GetOpponent();
         }
 
-        // 現在表示中の位置に対応するノードを取得
-        var nodeToAddFrom = this.GetNodeAtViewingPosition(viewingIndex);
+        // MoveTree.CurrentNodeを使用（GoToNodeAsyncで同期されている）
+        var nodeToAddFrom = this.MoveTree.CurrentNode;
 
         // 全く同じ手順が既に存在するかチェック
         if (this.HasExactSequenceFromNode(nodeToAddFrom, parsedMoves)) {
@@ -293,33 +293,6 @@ public class BranchService : IBranchService
         var result = this._rules.ReconstructBoard(branchHistory.Take(moveIndex));
         this._boardCache.Store(branchHistory, moveIndex, result.board, result.firstCaptured, result.secondCaptured, result.currentTurn);
         return result;
-    }
-
-    /// <summary>表示位置に対応するノードを取得</summary>
-    private MoveNode? GetNodeAtViewingPosition(int viewingIndex)
-    {
-        if (viewingIndex == 0) {
-            return null;
-        }
-
-        var branchHistory = this.State.DisplayBranchHistory;
-        var movesToFollow = branchHistory.Take(viewingIndex).ToList();
-
-        // ルートから順にたどる
-        MoveNode? node = null;
-        var children = this.MoveTree.RootChildren;
-
-        foreach (var move in movesToFollow) {
-            var next = children.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, move));
-            if (next is null) {
-                // ツリーに存在しない手順の場合はnull
-                return null;
-            }
-            node = next;
-            children = node.Children;
-        }
-
-        return node;
     }
 
     /// <summary>指定ノードから完全一致する手順が存在するかチェック</summary>
