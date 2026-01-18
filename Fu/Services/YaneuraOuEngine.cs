@@ -268,6 +268,9 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
             await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"position sfen {sfen}");
         }
 
+        // ウォッチドッグ開始
+        await this._jsRuntime.InvokeVoidAsync("ShogiEngine.startWatchdog");
+
         // go開始
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", goCommand);
 
@@ -282,6 +285,9 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
             }
         }
         finally {
+            // ウォッチドッグ停止
+            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.stopWatchdog");
+
             // キャンセル時はstopを送信してbestmoveを待つ
             if (this._isAnalyzing && !this._stopRequested) {
                 await this.StopAndDrainAsync();
