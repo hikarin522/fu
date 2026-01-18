@@ -254,8 +254,8 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
     {
         this.ThrowIfNotReady();
 
-        // 前回の分析があれば停止待ち
-        if (this._isAnalyzing && this._goChannel is not null) {
+        // 前回の分析があれば停止してドレイン
+        if (this._isAnalyzing || this._goChannel is not null) {
             await this.StopAndDrainAsync();
         }
 
@@ -289,33 +289,40 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
             // ウォッチドッグ停止
             await this._jsRuntime.InvokeVoidAsync("ShogiEngine.stopWatchdog");
 
-            // キャンセル時はstopを送信してbestmoveを待つ
+            // キャンセル時はstopを送信（bestmoveを待たない - 次のGoAsync呼び出し時に処理）
             if (this._isAnalyzing && !this._stopRequested) {
-                await this.StopAndDrainAsync();
+                this._stopRequested = true;
+                _ = this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "stop");
             }
         }
     }
 
     private async Task StopAndDrainAsync()
     {
-        if (!this._isAnalyzing || this._goChannel is null) {
+        var channel = this._goChannel;
+        if (channel is null) {
+            this._isAnalyzing = false;
             return;
         }
 
-        this._stopRequested = true;
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "stop");
+        // stopコマンドを送信（まだ送信していない場合）
+        if (!this._stopRequested) {
+            this._stopRequested = true;
+            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "stop");
+        }
 
-        // bestmoveが来るまで待機（タイムアウト付き）
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        // bestmoveが来るまで待機（短いタイムアウト）
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         try {
-            await foreach (var result in this._goChannel.Reader.ReadAllAsync(cts.Token)) {
+            await foreach (var result in channel.Reader.ReadAllAsync(cts.Token)) {
                 if (result is UsiGoResult.BestMove) {
                     break;
                 }
             }
         }
         catch (OperationCanceledException) {
-            // タイムアウト
+            // タイムアウト - チャンネルを強制クリア
+            channel.Writer.TryComplete();
         }
 
         this._isAnalyzing = false;

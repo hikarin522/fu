@@ -170,16 +170,26 @@ public class ShogiEngineService : IDisposable
     /// <summary>分析を停止</summary>
     public async Task StopAnalysisAsync()
     {
-        if (this._analysisCts is not null) {
-            await this._analysisCts.CancelAsync();
-            this._analysisCts.Dispose();
-            this._analysisCts = null;
+        var cts = this._analysisCts;
+        var task = this._analysisTask;
+
+        this._analysisCts = null;
+        this._analysisTask = null;
+
+        if (cts is not null) {
+            await cts.CancelAsync();
+            cts.Dispose();
         }
 
-        // 分析タスクの完了を待機
-        if (this._analysisTask is not null) {
-            await this._analysisTask;
-            this._analysisTask = null;
+        // 分析タスクの完了を待機（タイムアウト付き）
+        if (task is not null) {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            try {
+                await task.WaitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException) {
+                // タイムアウト - バックグラウンドで完了するのを待たない
+            }
         }
     }
 
