@@ -225,7 +225,11 @@ public partial class Index : IAsyncDisposable
 
     private async Task OnRemoteGameStartAsync()
     {
-        await this.RequireGameService.NewGameAsync();
+        // 古いプロトコル用（gameStartWithPlayersを使う新しいプロトコルでは呼ばれない）
+        if (this.GameService is not { } gs) {
+            return;
+        }
+        await gs.NewGameAsync();
         await this.InvokeAsync(this.StateHasChanged);
     }
 
