@@ -1,24 +1,19 @@
+using Fu.Core.Abstractions;
+
 namespace Fu.Core.Models;
-
-/// <summary>
-/// Player の拡張メソッド
-/// </summary>
-public static class PlayerExtensions
-{
-    /// <summary>相手プレイヤーを取得</summary>
-    public static Player GetOpponent(this Player player) =>
-        player == Player.Sente ? Player.Gote : Player.Sente;
-
-    /// <summary>前進方向を取得（先手: -1 = 上方向, 後手: 1 = 下方向）</summary>
-    public static int GetForwardDirection(this Player player) =>
-        player == Player.Sente ? -1 : 1;
-}
 
 /// <summary>
 /// PieceType の拡張メソッド
 /// </summary>
 public static class PieceTypeExtensions
 {
+    /// <summary>持ち駒の表示順序（飛車から歩まで）</summary>
+    public static readonly PieceType[] CapturedPieceOrder =
+    [
+        PieceType.Rook, PieceType.Bishop, PieceType.Gold, PieceType.Silver,
+        PieceType.Knight, PieceType.Lance, PieceType.Pawn
+    ];
+
     /// <summary>成駒かどうか</summary>
     public static bool IsPromoted(this PieceType type) =>
         type >= PieceType.PromotedRook;
@@ -91,6 +86,6 @@ public static class PieceExtensions
     /// <summary>盤面表示用の文字を取得（王は先手/後手で異なる）</summary>
     public static string GetDisplayChar(this Piece piece) =>
         piece.Type == PieceType.King
-            ? (piece.Owner == Player.Sente ? "王" : "玉")
+            ? (piece.Owner == Turn.First ? "王" : "玉")
             : piece.Type.GetDisplayChar();
 }

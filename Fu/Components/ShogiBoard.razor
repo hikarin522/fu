@@ -6,15 +6,15 @@
             @foreach (var arrow in GetDropArrows())
             {
                 @* 始点: 候補手のプレイヤーの持ち駒パネル *@
-                @* CandidateMovePlayerの持ち駒パネルが下(player)にあるか上(opponent)にあるか *@
+                @* CandidateMoveTurnの持ち駒パネルが下(player)にあるか上(opponent)にあるか *@
                 @* 下にあるのは: 先手視点(!IsFlipped)なら先手、後手視点(IsFlipped)なら後手 *@
-                var playerAtBottom = IsFlipped ? Player.Gote : Player.Sente;
-                var isDropFromBottom = CandidateMovePlayer == playerAtBottom;
+                var playerAtBottom = IsFlipped ? Turn.Second : Turn.First;
+                var isDropFromBottom = CandidateMoveTurn == playerAtBottom;
 
                 @* 持ち駒を取得（候補手のプレイヤーの持ち駒） *@
-                var capturedPieces = CandidateMovePlayer == Player.Sente
-                    ? DisplaySenteCaptured
-                    : DisplayGoteCaptured;
+                var capturedPieces = CandidateMoveTurn == Turn.First
+                    ? DisplayFirstCaptured
+                    : DisplaySecondCaptured;
 
                 @* 持ち駒パネル内の駒のインデックスを計算 *@
                 var pieceIndex = GetCapturedPieceIndex(capturedPieces, arrow.DropPiece!.Value);
@@ -75,8 +75,8 @@
     }
 
     <CapturedPiecesPanel
-        Pieces="@(IsFlipped ? DisplaySenteCaptured : DisplayGoteCaptured)"
-        Player="@(IsFlipped ? Player.Sente : Player.Gote)"
+        Pieces="@(IsFlipped ? DisplayFirstCaptured : DisplaySecondCaptured)"
+        Player="@(IsFlipped ? Turn.First : Turn.Second)"
         IsOpponent="true"
         OnPieceSelected="OnCapturedPieceClick"
         SelectedPiece="@(IsSelectingDropTarget ? SelectedDropPiece : null)" />
@@ -122,7 +122,7 @@
                                 @if (piece != null)
                                 {
                                     @* 後手視点(IsFlipped)では先手の駒を逆さま、先手視点では後手の駒を逆さまに *@
-                                    var isUpsideDown = IsFlipped ? piece.Owner == Player.Sente : piece.Owner == Player.Gote;
+                                    var isUpsideDown = IsFlipped ? piece.Owner == Turn.First : piece.Owner == Turn.Second;
                                     <div class="piece @(isUpsideDown ? "gote" : "") @(piece.Type.IsPromoted() ? "promoted" : "")">
                                         @piece.GetDisplayChar()
                                     </div>
@@ -169,8 +169,8 @@
     </div>
 
     <CapturedPiecesPanel
-        Pieces="@(IsFlipped ? DisplayGoteCaptured : DisplaySenteCaptured)"
-        Player="@(IsFlipped ? Player.Gote : Player.Sente)"
+        Pieces="@(IsFlipped ? DisplaySecondCaptured : DisplayFirstCaptured)"
+        Player="@(IsFlipped ? Turn.Second : Turn.First)"
         IsOpponent="false"
         OnPieceSelected="OnCapturedPieceClick"
         SelectedPiece="@(IsSelectingDropTarget ? SelectedDropPiece : null)" />

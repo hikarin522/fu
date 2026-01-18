@@ -5,7 +5,7 @@
         状態: <span class="status-@ConnectionState.ToString().ToLower()">@GetStatusText()</span>
     </div>
 
-    @if (ConnectionState == Services.ConnectionState.Disconnected)
+    @if (ConnectionState == TransportConnectionState.Disconnected)
     {
         @if (string.IsNullOrEmpty(Nickname))
         {
@@ -66,7 +66,7 @@
         }
     }
 
-    @if (ConnectionState == Services.ConnectionState.Connecting && WebRtcService.IsHost)
+    @if (ConnectionState == TransportConnectionState.Connecting && Lobby.IsHost)
     {
         <div class="connecting">
             <div class="room-url-section">
@@ -81,7 +81,7 @@
             <p>参加者を待っています...</p>
         </div>
     }
-    else if (ConnectionState == Services.ConnectionState.Connecting && !WebRtcService.IsHost)
+    else if (ConnectionState == TransportConnectionState.Connecting && !Lobby.IsHost)
     {
         <div class="connecting">
             <div class="spinner"></div>
@@ -89,18 +89,18 @@
         </div>
     }
 
-    @if (ConnectionState == Services.ConnectionState.Connected)
+    @if (ConnectionState == TransportConnectionState.Connected)
     {
         <div class="room-info">
             <div class="participants-section">
-                <h4>参加者 (@WebRtcService.Participants.Count)</h4>
+                <h4>参加者 (@Lobby.Participants.Count)</h4>
                 <ul class="participants-list">
-                    @foreach (var p in WebRtcService.Participants)
+                    @foreach (var p in Lobby.Participants)
                     {
-                        <li class="@(p.PeerId == WebRtcService.MyPeerId ? "me" : "")">
+                        <li class="@(p.PlayerId == Lobby.MyPlayerId ? "me" : "")">
                             @p.Nickname
                             @if (p.IsHost) { <span class="badge host">ホスト</span> }
-                            @if (p.PeerId == WebRtcService.MyPeerId) { <span class="badge me">(自分)</span> }
+                            @if (p.PlayerId == Lobby.MyPlayerId) { <span class="badge me">(自分)</span> }
                         </li>
                     }
                 </ul>

@@ -1,3 +1,5 @@
+using Fu.Core.Abstractions;
+
 namespace Fu.Core.Models;
 
 public enum PieceType
@@ -21,14 +23,7 @@ public enum PieceType
     PromotedPawn    // と金
 }
 
-public enum Player
-{
-    None = 0,
-    Sente,  // 先手（下側）
-    Gote    // 後手（上側）
-}
-
 /// <summary>
 /// 将棋の駒を表すレコード（データのみ）
 /// </summary>
-public record Piece(PieceType Type, Player Owner);
+public record Piece(PieceType Type, Turn Owner);

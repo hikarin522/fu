@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 
@@ -12,11 +11,11 @@ public static class KifExporter
     private static readonly string[] ColKanji = ["９", "８", "７", "６", "５", "４", "３", "２", "１"];
 
     public static string Export(
-        ImmutableList<Move> moves,
+        IReadOnlyList<Move> moves,
         GameStatus status,
         string senteNickname = "",
         string goteNickname = "",
-        ImmutableList<TimeSpan>? moveTimes = null)
+        IReadOnlyList<TimeSpan>? moveTimes = null)
     {
         var sb = new StringBuilder();
 
@@ -59,8 +58,8 @@ public static class KifExporter
         }
 
         // 終局
-        if (status is GameStatus.CheckmateSente or GameStatus.CheckmateGote) {
-            var winner = status == GameStatus.CheckmateSente ? "先手" : "後手";
+        if (status is GameStatus.CheckmateFirst or GameStatus.CheckmateSecond) {
+            var winner = status == GameStatus.CheckmateFirst ? "先手" : "後手";
             sb.AppendLine(CultureInfo.InvariantCulture, $"まで{moves.Count}手で{winner}の勝ち");
         }
 

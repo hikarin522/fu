@@ -13,5 +13,14 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddScoped<ShogiGameService>();
 builder.Services.AddScoped<WebRtcService>();
 builder.Services.AddScoped<ShogiEngineService>();
+builder.Services.AddScoped<UserSettingsService>();
+builder.Services.AddScoped<LobbyService>(sp =>
+    new LobbyService(sp.GetRequiredService<WebRtcService>()));
+builder.Services.AddScoped<GameSessionService>(sp =>
+    new GameSessionService(
+        sp.GetRequiredService<WebRtcService>(),
+        sp.GetRequiredService<ShogiGameService>(),
+        sp.GetRequiredService<LobbyService>(),
+        sp.GetRequiredService<Microsoft.JSInterop.IJSRuntime>()));
 
 await builder.Build().RunAsync();

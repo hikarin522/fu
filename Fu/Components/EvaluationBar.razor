@@ -1,3 +1,4 @@
+@using Fu.Core.Abstractions
 @using Fu.Core.Models
 @using Fu.Services
 @inject IJSRuntime JSRuntime
@@ -35,17 +36,17 @@
             @if (ShowHasMate && EngineService.MateIn is { } mate)
             {
                 @* 詰みは手番視点: mate > 0 = 手番側勝ち, mate < 0 = 手番側負け *@
-                var matePlayer = mate > 0 ? EngineService.MatePlayer : EngineService.MatePlayer.GetOpponent();
+                var matePlayer = mate > 0 ? EngineService.MateTurn : EngineService.MateTurn.GetOpponent();
                 var mateCount = Math.Abs(mate);
-                var isSenteMate = matePlayer == Player.Sente;
-                <div class="mate-info @(isSenteMate ? "sente-mate" : "gote-mate")">
+                var isFirstMate = matePlayer == Turn.First;
+                <div class="mate-info @(isFirstMate ? "sente-mate" : "gote-mate")">
                     @if (ShowMateCount)
                     {
-                        @(isSenteMate ? $"先手{mateCount}手詰み" : $"後手{mateCount}手詰み")
+                        @(isFirstMate ? $"先手{mateCount}手詰み" : $"後手{mateCount}手詰み")
                     }
                     else
                     {
-                        @(isSenteMate ? "先手に詰みあり" : "後手に詰みあり")
+                        @(isFirstMate ? "先手に詰みあり" : "後手に詰みあり")
                     }
                 </div>
                 @if (ShowMateSequence && !string.IsNullOrEmpty(EngineService.PrincipalVariation))
@@ -55,21 +56,6 @@
                         <span class="mate-sequence-moves">@FormatMateSequence(EngineService.PrincipalVariation)</span>
                     </div>
                 }
-            }
-            else if (ShowHasMate && EngineService.IsThreatening)
-            {
-                @* 詰めろ: ThreateningPlayer が詰めろにかかっている *@
-                var isSenteThreatened = EngineService.ThreateningPlayer == Player.Sente;
-                <div class="threatening-info @(isSenteThreatened ? "sente-threatened" : "gote-threatened")" title="受けなければ次に詰む状態">
-                    @if (ShowMateCount && EngineService.ThreateningMateIn is { } threatMate)
-                    {
-                        <span>@(isSenteThreatened ? "先手" : "後手")詰めろ (@(threatMate)手)</span>
-                    }
-                    else
-                    {
-                        <span>@(isSenteThreatened ? "先手" : "後手")詰めろ</span>
-                    }
-                </div>
             }
             @if (ShowCandidates && EngineService.Candidates.Count > 0)
             {

@@ -1,3 +1,4 @@
+using Fu.Core.Abstractions;
 using Fu.Core.Models.Dto;
 
 namespace Fu.Core.Models;
@@ -12,15 +13,15 @@ public sealed record Move(
     bool IsDrop = false,
     Position? From = null,
     PieceType? CapturedPiece = null,
-    Player Player = Player.None)
+    Turn Turn = Turn.None)
 {
     /// <summary>盤上の駒を動かす手を作成</summary>
     public static Move CreateMove(Position from, Position to, PieceType pieceType, bool isPromotion = false) =>
         new(to, pieceType, isPromotion, IsDrop: false, From: from);
 
     /// <summary>持ち駒を打つ手を作成</summary>
-    public static Move CreateDrop(Position to, PieceType pieceType, Player player) =>
-        new(to, pieceType, IsPromotion: false, IsDrop: true, Player: player);
+    public static Move CreateDrop(Position to, PieceType pieceType, Turn turn) =>
+        new(to, pieceType, IsPromotion: false, IsDrop: true, Turn: turn);
 
     /// <summary>棋譜表記 (例: 7六歩、7六歩成、7六歩打)</summary>
     public string ToNotation() => this.IsDrop
@@ -37,8 +38,8 @@ public sealed record Move(
         this with { CapturedPiece = capturedPiece };
 
     /// <summary>プレイヤーを設定した新しいインスタンスを返す</summary>
-    public Move WithPlayer(Player player) =>
-        this with { Player = player };
+    public Move WithTurn(Turn turn) =>
+        this with { Turn = turn };
 
     // DTO変換
     public MoveDto ToDto() => new(

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="R3" />
     <PackageReference Include="UnitGenerator" PrivateAssets="all" />
   </ItemGroup>
 

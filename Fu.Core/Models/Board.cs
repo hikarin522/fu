@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 
+using Fu.Core.Abstractions;
+
 namespace Fu.Core.Models;
 
 /// <summary>
@@ -39,35 +41,35 @@ public record Board
         builder.Count = Size * Size;
 
         // 後手の駒配置 (上側: row 0-2)
-        builder[4 * Size + 0] = new(PieceType.King, Player.Gote);
-        builder[3 * Size + 0] = new(PieceType.Gold, Player.Gote);
-        builder[5 * Size + 0] = new(PieceType.Gold, Player.Gote);
-        builder[2 * Size + 0] = new(PieceType.Silver, Player.Gote);
-        builder[6 * Size + 0] = new(PieceType.Silver, Player.Gote);
-        builder[1 * Size + 0] = new(PieceType.Knight, Player.Gote);
-        builder[7 * Size + 0] = new(PieceType.Knight, Player.Gote);
-        builder[0 * Size + 0] = new(PieceType.Lance, Player.Gote);
-        builder[8 * Size + 0] = new(PieceType.Lance, Player.Gote);
-        builder[7 * Size + 1] = new(PieceType.Bishop, Player.Gote);
-        builder[1 * Size + 1] = new(PieceType.Rook, Player.Gote);
+        builder[4 * Size + 0] = new(PieceType.King, Turn.Second);
+        builder[3 * Size + 0] = new(PieceType.Gold, Turn.Second);
+        builder[5 * Size + 0] = new(PieceType.Gold, Turn.Second);
+        builder[2 * Size + 0] = new(PieceType.Silver, Turn.Second);
+        builder[6 * Size + 0] = new(PieceType.Silver, Turn.Second);
+        builder[1 * Size + 0] = new(PieceType.Knight, Turn.Second);
+        builder[7 * Size + 0] = new(PieceType.Knight, Turn.Second);
+        builder[0 * Size + 0] = new(PieceType.Lance, Turn.Second);
+        builder[8 * Size + 0] = new(PieceType.Lance, Turn.Second);
+        builder[7 * Size + 1] = new(PieceType.Bishop, Turn.Second);
+        builder[1 * Size + 1] = new(PieceType.Rook, Turn.Second);
         for (var col = 0; col < Size; col++) {
-            builder[col * Size + 2] = new(PieceType.Pawn, Player.Gote);
+            builder[col * Size + 2] = new(PieceType.Pawn, Turn.Second);
         }
 
         // 先手の駒配置 (下側: row 6-8)
-        builder[4 * Size + 8] = new(PieceType.King, Player.Sente);
-        builder[3 * Size + 8] = new(PieceType.Gold, Player.Sente);
-        builder[5 * Size + 8] = new(PieceType.Gold, Player.Sente);
-        builder[2 * Size + 8] = new(PieceType.Silver, Player.Sente);
-        builder[6 * Size + 8] = new(PieceType.Silver, Player.Sente);
-        builder[1 * Size + 8] = new(PieceType.Knight, Player.Sente);
-        builder[7 * Size + 8] = new(PieceType.Knight, Player.Sente);
-        builder[0 * Size + 8] = new(PieceType.Lance, Player.Sente);
-        builder[8 * Size + 8] = new(PieceType.Lance, Player.Sente);
-        builder[1 * Size + 7] = new(PieceType.Bishop, Player.Sente);
-        builder[7 * Size + 7] = new(PieceType.Rook, Player.Sente);
+        builder[4 * Size + 8] = new(PieceType.King, Turn.First);
+        builder[3 * Size + 8] = new(PieceType.Gold, Turn.First);
+        builder[5 * Size + 8] = new(PieceType.Gold, Turn.First);
+        builder[2 * Size + 8] = new(PieceType.Silver, Turn.First);
+        builder[6 * Size + 8] = new(PieceType.Silver, Turn.First);
+        builder[1 * Size + 8] = new(PieceType.Knight, Turn.First);
+        builder[7 * Size + 8] = new(PieceType.Knight, Turn.First);
+        builder[0 * Size + 8] = new(PieceType.Lance, Turn.First);
+        builder[8 * Size + 8] = new(PieceType.Lance, Turn.First);
+        builder[1 * Size + 7] = new(PieceType.Bishop, Turn.First);
+        builder[7 * Size + 7] = new(PieceType.Rook, Turn.First);
         for (var col = 0; col < Size; col++) {
-            builder[col * Size + 6] = new(PieceType.Pawn, Player.Sente);
+            builder[col * Size + 6] = new(PieceType.Pawn, Turn.First);
         }
 
         return builder.MoveToImmutable();
@@ -89,17 +91,17 @@ public record Board
     }
 
     /// <summary>指定プレイヤーの王の位置を検索</summary>
-    public Position? FindKing(Player player) =>
-        AllPositions.FirstOrDefault(pos => this[pos] is { Type: PieceType.King } piece && piece.Owner == player);
+    public Position? FindKing(Turn turn) =>
+        AllPositions.FirstOrDefault(pos => this[pos] is { Type: PieceType.King } piece && piece.Owner == turn);
 
     /// <summary>指定プレイヤーの全駒を列挙（nullなら全プレイヤー）</summary>
-    public IEnumerable<(Position pos, Piece piece)> GetAllPieces(Player? player = null) =>
+    public IEnumerable<(Position pos, Piece piece)> GetAllPieces(Turn? turn = null) =>
         AllPositions
             .Select(pos => (pos, piece: this[pos]))
-            .Where(x => x.piece is not null && (player is null || x.piece.Owner == player))
+            .Where(x => x.piece is not null && (turn is null || x.piece.Owner == turn))
             .Select(x => (x.pos, x.piece!));
 
     /// <summary>指定列に歩があるか（二歩チェック用）</summary>
-    public bool HasPawnInColumn(int col, Player player) =>
-        Enumerable.Range(0, Size).Any(row => this[col, row] is { Type: PieceType.Pawn } piece && piece.Owner == player);
+    public bool HasPawnInColumn(int col, Turn turn) =>
+        Enumerable.Range(0, Size).Any(row => this[col, row] is { Type: PieceType.Pawn } piece && piece.Owner == turn);
 }

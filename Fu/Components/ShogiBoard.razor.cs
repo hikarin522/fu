@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 
+using Fu.Core.Abstractions;
 using Fu.Core.Models;
 using Fu.Core.Services;
 using Fu.Services;
@@ -17,7 +18,7 @@ public partial class ShogiBoard
     [Parameter] public IReadOnlyList<CandidateMove>? CandidateMoves { get; set; }
 
     /// <summary>候補手の手番（駒打ち矢印の始点判定用）</summary>
-    [Parameter] public Player CandidateMovePlayer { get; set; } = Player.Sente;
+    [Parameter] public Turn CandidateMoveTurn { get; set; } = Turn.First;
 
     private Position? SelectedPosition { get; set; }
     private List<Position> LegalMoves { get; set; } = [];
@@ -30,25 +31,25 @@ public partial class ShogiBoard
     private List<Position> DropLegalMoves { get; set; } = [];
 
     // 閲覧モード用の表示状態（キャッシュ）
-    private (Board board, CapturedPieces senteCaptured, CapturedPieces goteCaptured, Player currentPlayer) DisplayState {
+    private (Board board, CapturedPieces firstCaptured, CapturedPieces secondCaptured, Turn currentTurn) DisplayState {
         get {
             if (this.State.IsReviewing) {
                 return this.GameService.GetBoardAtMove(this.State.DisplayMoveIndex);
             }
-            return (this.State.Board, this.State.SenteCaptured, this.State.GoteCaptured, this.State.CurrentPlayer);
+            return (this.State.Board, this.State.FirstCaptured, this.State.SecondCaptured, this.State.CurrentTurn);
         }
     }
 
     private Board DisplayBoard => this.DisplayState.board;
-    private CapturedPieces DisplaySenteCaptured => this.DisplayState.senteCaptured;
-    private CapturedPieces DisplayGoteCaptured => this.DisplayState.goteCaptured;
-    private Player DisplayCurrentPlayer => this.DisplayState.currentPlayer;
+    private CapturedPieces DisplayFirstCaptured => this.DisplayState.firstCaptured;
+    private CapturedPieces DisplaySecondCaptured => this.DisplayState.secondCaptured;
+    private Turn DisplayCurrentTurn => this.DisplayState.currentTurn;
 
     // 閲覧モードでは表示中の盤面の手番で判定（分岐から再開できる）
     // 検討モードでは手番関係なく自由に動かせる
     private bool CanInteract =>
         this.State.Status == GameStatus.Reviewing ||
-        (this.State.Status == GameStatus.Playing && this.DisplayCurrentPlayer == this.State.LocalPlayer);
+        (this.State.Status == GameStatus.Playing && this.DisplayCurrentTurn == this.State.LocalTurn);
 
     private async Task OnCellClickAsync(Position pos)
     {
@@ -80,14 +81,14 @@ public partial class ShogiBoard
         }
         var targetPiece = this.DisplayBoard[to];
         // 自分の駒がある場所には動けない
-        return targetPiece is null || targetPiece.Owner != this.DisplayCurrentPlayer;
+        return targetPiece is null || targetPiece.Owner != this.DisplayCurrentTurn;
     }
 
     private async Task HandleDropAsync(Position pos, PieceType dropPiece)
     {
         // 閲覧モードでは合法手リストが空なので、配置可能かどうかを直接チェック
         if (this.DropLegalMoves.Contains(pos) || (this.State.IsReviewing && this.DisplayBoard[pos] is null)) {
-            var move = Move.CreateDrop(pos, dropPiece, this.DisplayCurrentPlayer);
+            var move = Move.CreateDrop(pos, dropPiece, this.DisplayCurrentTurn);
             await this.ExecuteMoveAsync(move);
         }
         this.ClearSelection();
@@ -123,15 +124,15 @@ public partial class ShogiBoard
         if (!piece.Type.CanPromote() || piece.Type.IsPromoted()) {
             return false;
         }
-        const int sentePromotionBoundary = 2, gotePromotionBoundary = 6;
-        return piece.Owner == Player.Sente
-            ? from.Row <= sentePromotionBoundary || to.Row <= sentePromotionBoundary
-            : from.Row >= gotePromotionBoundary || to.Row >= gotePromotionBoundary;
+        const int firstPromotionBoundary = 2, secondPromotionBoundary = 6;
+        return piece.Owner == Turn.First
+            ? from.Row <= firstPromotionBoundary || to.Row <= firstPromotionBoundary
+            : from.Row >= secondPromotionBoundary || to.Row >= secondPromotionBoundary;
     }
 
     private static bool MustPromoteOnDisplayBoard(Position to, Piece piece)
     {
-        var effectiveRow = piece.Owner == Player.Sente ? to.Row : Board.Size - 1 - to.Row;
+        var effectiveRow = piece.Owner == Turn.First ? to.Row : Board.Size - 1 - to.Row;
         return piece.Type switch {
             PieceType.Pawn or PieceType.Lance => effectiveRow == 0,
             PieceType.Knight => effectiveRow <= 1,
@@ -141,7 +142,7 @@ public partial class ShogiBoard
 
     private async Task ExecuteMoveWithPromotionAsync(Position from, Position to, PieceType pieceType, bool promote)
     {
-        var move = Move.CreateMove(from, to, pieceType, promote).WithPlayer(this.DisplayCurrentPlayer);
+        var move = Move.CreateMove(from, to, pieceType, promote).WithTurn(this.DisplayCurrentTurn);
         await this.ExecuteMoveAsync(move);
         this.ClearSelection();
     }
@@ -156,7 +157,7 @@ public partial class ShogiBoard
     private void HandlePieceSelection(Position pos)
     {
         var clickedPiece = this.DisplayBoard[pos];
-        if (clickedPiece is { Owner: var owner } && owner == this.DisplayCurrentPlayer) {
+        if (clickedPiece is { Owner: var owner } && owner == this.DisplayCurrentTurn) {
             this.SelectedPosition = pos;
             // 閲覧モードでは合法手ハイライト無し（動かした時にBranchFromCurrentPositionAsyncで復元してからチェック）
             this.LegalMoves = this.State.IsReviewing ? [] : this.GameService.GetLegalMoves(pos);
@@ -175,9 +176,9 @@ public partial class ShogiBoard
         }
 
         // 閲覧モードでは表示中の持ち駒を使用
-        var captured = this.DisplayCurrentPlayer == Player.Sente
-            ? this.DisplaySenteCaptured
-            : this.DisplayGoteCaptured;
+        var captured = this.DisplayCurrentTurn == Turn.First
+            ? this.DisplayFirstCaptured
+            : this.DisplaySecondCaptured;
 
         if (captured.GetCount(pieceType) <= 0) {
             return;
@@ -198,7 +199,7 @@ public partial class ShogiBoard
         if (this.PendingMoveFrom is { } moveFrom && this.PendingMoveTo is { } moveTo) {
             var piece = this.DisplayBoard[moveFrom];
             var move = Move.CreateMove(moveFrom, moveTo, piece!.Type, promote)
-                .WithPlayer(this.DisplayCurrentPlayer);
+                .WithTurn(this.DisplayCurrentTurn);
             await this.ExecuteMoveAsync(move);
         }
 
@@ -289,7 +290,6 @@ public partial class ShogiBoard
     /// <summary>持ち駒パネル内の駒の表示インデックスを取得</summary>
     private static int GetCapturedPieceIndex(CapturedPieces pieces, char sfenPiece)
     {
-        var pieceOrder = new[] { PieceType.Rook, PieceType.Bishop, PieceType.Gold, PieceType.Silver, PieceType.Knight, PieceType.Lance, PieceType.Pawn };
         var targetType = sfenPiece switch {
             'R' => PieceType.Rook,
             'B' => PieceType.Bishop,
@@ -306,7 +306,7 @@ public partial class ShogiBoard
         }
 
         var index = 0;
-        foreach (var pieceType in pieceOrder) {
+        foreach (var pieceType in PieceTypeExtensions.CapturedPieceOrder) {
             if (pieces.GetCount(pieceType) > 0) {
                 if (pieceType == targetType) {
                     return index;

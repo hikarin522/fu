@@ -1,8 +1,9 @@
-using System.Collections.Immutable;
-
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
+using R3;
+
+using Fu.Core.Abstractions;
 using Fu.Core.Models;
 using Fu.Core.Models.Dto;
 using Fu.Core.Services;
@@ -12,9 +13,13 @@ namespace Fu.Pages;
 
 public partial class Index : IAsyncDisposable
 {
+    private readonly CompositeDisposable _disposables = [];
     [Inject] private ShogiGameService GameService { get; set; } = null!;
     [Inject] private WebRtcService WebRtcService { get; set; } = null!;
     [Inject] private ShogiEngineService EngineService { get; set; } = null!;
+    [Inject] private GameSessionService SessionService { get; set; } = null!;
+    [Inject] private UserSettingsService UserSettings { get; set; } = null!;
+    [Inject] private LobbyService Lobby { get; set; } = null!;
     [Inject] private IJSRuntime JS { get; set; } = null!;
     [Inject] private NavigationManager Navigation { get; set; } = null!;
 
@@ -25,22 +30,34 @@ public partial class Index : IAsyncDisposable
 
     // 対局者は自分が後手なら反転（検討中は手動切り替え）、観戦者は手動切り替え
     private bool IsFlipped => this.IsPlayer && !this.GameService.State.IsReviewing
-        ? this.GameService.State.LocalPlayer == Player.Gote
+        ? this.GameService.State.LocalTurn == Turn.Second
         : this.SpectatorFlipped;
 
     private string? InitError { get; set; }
     private string BaseUrl => this.Navigation.BaseUri;
 
-    // 対局者情報
-    private string? SentePeerId { get; set; }
-    private string? GotePeerId { get; set; }
-    private string SenteNickname { get; set; } = "先手";
-    private string GoteNickname { get; set; } = "後手";
+    // 対局者情報（SessionServiceから取得）
+    private PlayerId? FirstPlayerId => this.SessionService.Session.FirstPlayerId;
+    private PlayerId? SecondPlayerId => this.SessionService.Session.SecondPlayerId;
+    private string FirstNickname => this.SessionService.Session.FirstNickname;
+    private string SecondNickname => this.SessionService.Session.SecondNickname;
 
     // 新規対局ダイアログ
     private bool ShowNewGameDialog { get; set; }
-    private string SelectedSentePeerId { get; set; } = "";
-    private string SelectedGotePeerId { get; set; } = "";
+    private PlayerId? SelectedFirstPlayerId { get; set; }
+    private PlayerId? SelectedSecondPlayerId { get; set; }
+
+    // Blazor select用の文字列バインディング
+    private string SelectedFirstPlayerIdString
+    {
+        get => this.SelectedFirstPlayerId?.AsPrimitive() ?? "";
+        set => this.SelectedFirstPlayerId = string.IsNullOrEmpty(value) ? null : new PlayerId(value);
+    }
+    private string SelectedSecondPlayerIdString
+    {
+        get => this.SelectedSecondPlayerId?.AsPrimitive() ?? "";
+        set => this.SelectedSecondPlayerId = string.IsNullOrEmpty(value) ? null : new PlayerId(value);
+    }
 
     // 対局者向け評価値表示オプション（ダイアログ用）
     private bool OptShowAdvantage { get; set; }
@@ -48,30 +65,29 @@ public partial class Index : IAsyncDisposable
     private bool OptShowHasMate { get; set; }
     private bool OptShowMateCount { get; set; }
 
-    // 現在のゲームに適用されている評価値表示オプション
-    private EvaluationDisplayOptions CurrentEvaluationOptions { get; set; } = new();
+    // 現在のゲームに適用されている評価値表示オプション（SessionServiceから取得）
+    private EvaluationDisplayOptions CurrentEvaluationOptions => this.SessionService.Session.EvaluationOptions;
 
-    // 役割判定
-    private bool IsPlayer => this.WebRtcService.MyPeerId == this.SentePeerId ||
-                             this.WebRtcService.MyPeerId == this.GotePeerId;
-    private bool IsSpectator => !this.IsPlayer && this.GameService.State.Status == GameStatus.Playing;
+    // 役割判定（SessionServiceから取得）
+    private bool IsPlayer => this.SessionService.IsPlayer;
+    private bool IsSpectator => this.SessionService.IsSpectator;
     private bool IsGameEnded => this.GameService.State.Status.IsGameOver();
 
-    // 参加者一覧表示用
-    private string GetParticipantRole(string peerId) =>
-        peerId == this.SentePeerId ? "先手" : peerId == this.GotePeerId ? "後手" : "観戦";
+    // 参加者一覧表示用（SessionServiceから取得）
+    private string GetParticipantRole(PlayerId playerId) =>
+        this.SessionService.Session.GetRole(playerId);
 
-    private int GetParticipantSortOrder(string peerId) =>
-        peerId == this.SentePeerId ? 0 : peerId == this.GotePeerId ? 1 : 2;
+    private int GetParticipantSortOrder(PlayerId playerId) =>
+        this.SessionService.Session.GetSortOrder(playerId);
 
-    private IEnumerable<(Participant Participant, string Role, bool IsConnected, bool IsMe)> GetAllParticipantsInfo()
+    private IEnumerable<(TransportParticipant Participant, string Role, bool IsConnected, bool IsMe)> GetAllParticipantsInfo()
     {
-        var connectedPeerIds = this.WebRtcService.Participants.Select(p => p.PeerId).ToHashSet();
-        var myPeerId = this.WebRtcService.MyPeerId;
+        var connectedPlayerIds = this.Lobby.Participants.Select(p => p.PlayerId).ToHashSet();
+        var myPlayerId = this.Lobby.MyPlayerId;
 
         // 接続中の参加者（対局者優先でソート）
-        foreach (var p in this.WebRtcService.Participants.OrderBy(p => this.GetParticipantSortOrder(p.PeerId))) {
-            yield return (p, this.GetParticipantRole(p.PeerId), true, p.PeerId == myPeerId);
+        foreach (var p in this.Lobby.Participants.OrderBy(p => this.GetParticipantSortOrder(p.PlayerId))) {
+            yield return (p, this.GetParticipantRole(p.PlayerId), true, p.PlayerId == myPlayerId);
         }
 
         // 切断された対局者を表示（ゲーム中の場合のみ）
@@ -79,11 +95,11 @@ public partial class Index : IAsyncDisposable
             yield break;
         }
 
-        if (this.SentePeerId is not null && !connectedPeerIds.Contains(this.SentePeerId)) {
-            yield return (new Participant(this.SentePeerId, this.SenteNickname, false), "先手", false, false);
+        if (this.FirstPlayerId is { } firstId && !connectedPlayerIds.Contains(firstId)) {
+            yield return (new TransportParticipant(firstId, this.FirstNickname, false), "先手", false, false);
         }
-        if (this.GotePeerId is not null && !connectedPeerIds.Contains(this.GotePeerId)) {
-            yield return (new Participant(this.GotePeerId, this.GoteNickname, false), "後手", false, false);
+        if (this.SecondPlayerId is { } secondId && !connectedPlayerIds.Contains(secondId)) {
+            yield return (new TransportParticipant(secondId, this.SecondNickname, false), "後手", false, false);
         }
     }
 
@@ -104,12 +120,13 @@ public partial class Index : IAsyncDisposable
     // Cross-Origin Isolationのリロードが必要かどうか
     private bool NeedsReload { get; set; }
 
-    // 通知音設定
-    private bool SoundEnabled { get; set; } = true;
+    // 通知音設定（UserSettingsから取得）
+    private bool SoundEnabled => this.UserSettings.SoundEnabled;
 
     // タイマー更新用
     private Timer? _uiTimer;
     private TimeSpan _currentTurnElapsed;
+    private bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
@@ -120,10 +137,10 @@ public partial class Index : IAsyncDisposable
                 return; // リロード中なので以降の初期化をスキップ
             }
 
-            await this.WebRtcService.InitializeAsync();
+            await this.Lobby.InitializeAsync();
 
             // 通知音設定を読み込み
-            this.SoundEnabled = await this.LoadSoundSettingAsync();
+            await this.UserSettings.LoadAsync();
 
             this.SubscribeToEvents();
 
@@ -140,6 +157,11 @@ public partial class Index : IAsyncDisposable
 
     private void OnTimerTick(object? state)
     {
+        // Dispose済みなら何もしない
+        if (this._disposed) {
+            return;
+        }
+
         // 対局中のみ更新
         if (this.GameService.State.Status == GameStatus.Playing && !this.GameService.State.IsReviewing) {
             this._currentTurnElapsed = this.GameService.GetCurrentTurnElapsed();
@@ -150,11 +172,11 @@ public partial class Index : IAsyncDisposable
     private async Task OnDataChannelReadyAsync()
     {
         await this.InvokeAsync(async () => {
-            if (!this.WebRtcService.IsHost) {
-                // 非ホストの場合は現在のゲーム状態をリクエスト
-                await this.WebRtcService.SendGameStateRequestAsync();
+            if (!this.SessionService.IsAuthority) {
+                // 非権威者（ゲスト）の場合は現在のゲーム状態をリクエスト
+                await this.SessionService.RequestStateSyncAsync();
             }
-            // ホストの場合は空の盤面を表示（「新規対局」ボタンから対局設定を開く）
+            // 権威者（ホスト）の場合は空の盤面を表示（「新規対局」ボタンから対局設定を開く）
             this.StateHasChanged();
         });
     }
@@ -165,8 +187,23 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private Task OnGameStartWithPlayersAsync(GameStartInfo info) =>
-        this.InvokeAsync(() => this.SetupGameAsync(info.SentePeerId, info.GotePeerId, info.SenteNickname, info.GoteNickname, info.EvaluationOptions));
+    private async Task OnGameStartWithPlayersAsync(GameStartInfo info)
+    {
+        await this.InvokeAsync(async () => {
+            await this.SessionService.ApplyRemoteGameStartAsync(info);
+
+            // 自分が先手（最初の手番）なら通知音を鳴らす
+            if (this.SessionService.LocalTurn == Turn.First) {
+                await this.PlayTurnNotificationAsync();
+            }
+
+            this.ShowNewGameDialog = false;
+            this.StateHasChanged();
+        });
+    }
+
+    // JS interop用にPlayerIdを文字列に変換
+    private static string? PlayerIdToString(PlayerId? playerId) => playerId?.AsPrimitive();
 
     private async Task OnMoveMade(Move move)
     {
@@ -188,57 +225,11 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private async Task PlayTurnNotificationAsync()
-    {
-        if (!this.SoundEnabled) {
-            return;
-        }
+    private Task PlayTurnNotificationAsync() =>
+        this.UserSettings.PlayTurnNotificationAsync();
 
-        try {
-            await this.JS.InvokeVoidAsync("TurnNotification.play");
-        }
-        catch {
-            // 音声再生に失敗しても無視
-        }
-    }
-
-    private async Task ToggleSoundAsync()
-    {
-        this.SoundEnabled = !this.SoundEnabled;
-        await this.SaveSoundSettingAsync(this.SoundEnabled);
-    }
-
-    private async Task<bool> LoadSoundSettingAsync()
-    {
-        try {
-            var value = await this.JS.InvokeAsync<string?>("SoundSettings.load");
-            return value != "false"; // デフォルトはtrue
-        }
-        catch {
-            return true;
-        }
-    }
-
-    private async Task SaveSoundSettingAsync(bool enabled)
-    {
-        try {
-            await this.JS.InvokeVoidAsync("SoundSettings.save", enabled ? "true" : "false");
-        }
-        catch {
-            // 保存失敗は無視
-        }
-    }
-
-    private async Task SaveGameSessionAsync()
-    {
-        try {
-            var nickname = await this.JS.InvokeAsync<string>("NicknameStorage.load");
-            await this.JS.InvokeVoidAsync("GameSession.save", this.WebRtcService.RoomId?.AsPrimitive(), nickname, this.WebRtcService.MyPeerId);
-        }
-        catch {
-            // 保存失敗は無視
-        }
-    }
+    private Task ToggleSoundAsync() =>
+        this.UserSettings.ToggleSoundAsync();
 
     private async Task<GameSessionData?> LoadGameSessionAsync()
     {
@@ -251,15 +242,8 @@ public partial class Index : IAsyncDisposable
         }
     }
 
-    private async Task ClearGameSessionAsync()
-    {
-        try {
-            await this.JS.InvokeVoidAsync("GameSession.clear");
-        }
-        catch {
-            // クリア失敗は無視
-        }
-    }
+    private Task ClearGameSessionAsync() =>
+        this.SessionService.ClearSessionAsync();
 
     private sealed record GameSessionData(string RoomId, string Nickname, string? PeerId, long Timestamp);
 
@@ -276,16 +260,16 @@ public partial class Index : IAsyncDisposable
     private void OpenNewGameDialog()
     {
         // 参加者が2人の場合、デフォルトで先手・後手を割り当て
-        var participants = this.WebRtcService.Participants.ToList();
+        var participants = this.Lobby.Participants.ToList();
         if (participants.Count >= 2) {
             // 自分を先手、相手を後手にデフォルト設定
-            var me = participants.FirstOrDefault(p => p.PeerId == this.WebRtcService.MyPeerId);
-            var opponent = participants.FirstOrDefault(p => p.PeerId != this.WebRtcService.MyPeerId);
-            this.SelectedSentePeerId = me?.PeerId ?? participants[0].PeerId;
-            this.SelectedGotePeerId = opponent?.PeerId ?? participants[1].PeerId;
+            var me = participants.FirstOrDefault(p => p.PlayerId == this.Lobby.MyPlayerId);
+            var opponent = participants.FirstOrDefault(p => p.PlayerId != this.Lobby.MyPlayerId);
+            this.SelectedFirstPlayerId = me?.PlayerId ?? participants[0].PlayerId;
+            this.SelectedSecondPlayerId = opponent?.PlayerId ?? participants[1].PlayerId;
         } else {
-            this.SelectedSentePeerId = "";
-            this.SelectedGotePeerId = "";
+            this.SelectedFirstPlayerId = null;
+            this.SelectedSecondPlayerId = null;
         }
         this.OptShowAdvantage = false;
         this.OptShowEvaluationValue = false;
@@ -296,10 +280,14 @@ public partial class Index : IAsyncDisposable
 
     private async Task StartNewGameAsync()
     {
-        var senteParticipant = this.WebRtcService.Participants.FirstOrDefault(p => p.PeerId == this.SelectedSentePeerId);
-        var goteParticipant = this.WebRtcService.Participants.FirstOrDefault(p => p.PeerId == this.SelectedGotePeerId);
+        if (this.SelectedFirstPlayerId is not { } firstId || this.SelectedSecondPlayerId is not { } secondId) {
+            return;
+        }
 
-        if (senteParticipant is null || goteParticipant is null) {
+        var firstParticipant = this.Lobby.Participants.FirstOrDefault(p => p.PlayerId == firstId);
+        var secondParticipant = this.Lobby.Participants.FirstOrDefault(p => p.PlayerId == secondId);
+
+        if (firstParticipant is null || secondParticipant is null) {
             return;
         }
 
@@ -309,37 +297,13 @@ public partial class Index : IAsyncDisposable
             this.OptShowHasMate,
             this.OptShowMateCount);
 
-        await this.SetupGameAsync(
-            this.SelectedSentePeerId,
-            this.SelectedGotePeerId,
-            senteParticipant.Nickname,
-            goteParticipant.Nickname,
-            options);
-        await this.WebRtcService.SendGameStartAsync(this.SentePeerId!, this.GotePeerId!, options);
-    }
+        var firstPlayer = new PlayerInfo(firstId, firstParticipant.Nickname, Turn.First);
+        var secondPlayer = new PlayerInfo(secondId, secondParticipant.Nickname, Turn.Second);
 
-    private async Task SetupGameAsync(string sentePeerId, string gotePeerId, string senteNickname, string goteNickname, EvaluationDisplayOptions? evaluationOptions = null)
-    {
-        this.SentePeerId = sentePeerId;
-        this.GotePeerId = gotePeerId;
-        this.SenteNickname = senteNickname;
-        this.GoteNickname = goteNickname;
-        this.CurrentEvaluationOptions = evaluationOptions ?? new EvaluationDisplayOptions();
-
-        var localPlayer = this.WebRtcService.MyPeerId == sentePeerId ? Player.Sente
-            : this.WebRtcService.MyPeerId == gotePeerId ? Player.Gote
-            : Player.None;
-
-        await this.GameService.SetLocalPlayerAsync(localPlayer);
-        await this.GameService.NewGameAsync();
-
-        // 対局者の場合、セッション情報を保存（リロード時の再接続用）
-        if (localPlayer != Player.None && this.WebRtcService.RoomId is not null) {
-            await this.SaveGameSessionAsync();
-        }
+        await this.SessionService.StartNewGameAsync(firstPlayer, secondPlayer, options);
 
         // 自分が先手（最初の手番）なら通知音を鳴らす
-        if (localPlayer == Player.Sente) {
+        if (this.SessionService.LocalTurn == Turn.First) {
             await this.PlayTurnNotificationAsync();
         }
 
@@ -349,75 +313,25 @@ public partial class Index : IAsyncDisposable
 
     private async Task ResignAsync()
     {
-        await this.GameService.ResignAsync();
-        await this.WebRtcService.SendResignAsync();
-        await this.ClearGameSessionAsync();
+        await this.SessionService.ResignAsync();
     }
 
     private async Task OnRemoteResignReceivedAsync()
     {
-        await this.GameService.ResignAsync();
-        await this.ClearGameSessionAsync();
+        await this.SessionService.ApplyRemoteResignAsync();
         await this.InvokeAsync(this.StateHasChanged);
     }
 
     private async Task OnGameStateRequestedAsync()
     {
-        // ホストがゲーム状態リクエストを受信したら、現在の状態を送信
-        if (this.WebRtcService.IsHost && this.GameService.State.Status != GameStatus.WaitingForConnection) {
-            await this.SendGameStateSyncAsync();
-        }
+        // 権威者（ホスト）がゲーム状態リクエストを受信したら、現在の状態を送信
+        await this.SessionService.BroadcastStateAsync();
     }
-
-    private Task OnBecameHostAsync()
-    {
-        // ホストを引き継いだ時点で特に処理は不要
-        // 新しい参加者がGameStateRequestを送ってきたら応答する
-        Console.WriteLine("Became host");
-        return Task.CompletedTask;
-    }
-
-    private Task SendGameStateSyncAsync() =>
-        this.WebRtcService.SendGameStateSyncAsync(
-            this.GameService.State.MoveHistory,
-            this.SentePeerId ?? "",
-            this.GotePeerId ?? "",
-            this.SenteNickname,
-            this.GoteNickname,
-            this.GameService.State.Status,
-            this.CurrentEvaluationOptions,
-            this.GameService.State.Times
-        );
 
     private async Task OnGameStateSyncReceivedAsync(GameStateSyncInfo info)
     {
         await this.InvokeAsync(async () => {
-            // 対局者情報を設定
-            this.SentePeerId = info.SentePeerId;
-            this.GotePeerId = info.GotePeerId;
-            this.SenteNickname = info.SenteNickname;
-            this.GoteNickname = info.GoteNickname;
-            this.CurrentEvaluationOptions = info.EvaluationOptions ?? new EvaluationDisplayOptions();
-
-            // 自分が対局者かどうかを判定
-            var localPlayer = this.WebRtcService.MyPeerId == info.SentePeerId ? Player.Sente
-                : this.WebRtcService.MyPeerId == info.GotePeerId ? Player.Gote
-                : Player.None;
-
-            await this.GameService.SetLocalPlayerAsync(localPlayer);
-
-            // ゲーム状態を復元（持ち時間含む）
-            await this.GameService.RestoreStateAsync(info.MoveHistory, info.Status, info.MoveTimes);
-
-            // 対局者かつ対局中ならセッション保存、終了していればクリア
-            if (localPlayer != Player.None) {
-                if (info.Status == GameStatus.Playing) {
-                    await this.SaveGameSessionAsync();
-                } else if (info.Status.IsGameOver()) {
-                    await this.ClearGameSessionAsync();
-                }
-            }
-
+            await this.SessionService.ApplyGameStateSyncAsync(info);
             this.ShowNewGameDialog = false;
             this.StateHasChanged();
         });
@@ -435,7 +349,7 @@ public partial class Index : IAsyncDisposable
         await this.InvokeAsync(this.StateHasChanged);
     }
 
-    private async ValueTask OnBranchResumedAsync(ImmutableList<Move> moveHistory)
+    private async ValueTask OnBranchResumedAsync(IReadOnlyList<Move> moveHistory)
     {
         // 分岐再開を相手に通知
         await this.WebRtcService.SendBranchResumeAsync(moveHistory);
@@ -458,7 +372,7 @@ public partial class Index : IAsyncDisposable
     {
         try {
             await this.EngineService.InitializeAsync();
-            this.EngineService.OnEvaluationUpdated += this.OnEvaluationUpdatedAsync;
+            // R3 購読は SubscribeToEvents で行う
         }
         catch {
             // エンジン初期化失敗は無視
@@ -486,22 +400,21 @@ public partial class Index : IAsyncDisposable
         }
 
         var state = this.GameService.State;
-        var (board, senteCaptured, goteCaptured, currentPlayer) = state.IsReviewing
+        var (board, firstCaptured, secondCaptured, currentTurn) = state.IsReviewing
             ? this.GameService.GetBoardAtMove(state.DisplayMoveIndex)
-            : (state.Board, state.SenteCaptured, state.GoteCaptured, state.CurrentPlayer);
+            : (state.Board, state.FirstCaptured, state.SecondCaptured, state.CurrentTurn);
 
         // 観戦者または対局終了後は候補手を3つ表示
         var multiPv = this.ShowCandidateArrows ? 3 : 1;
 
         // depth: 0 = 無限探索（局面が変わるまで継続）
-        // 詰み表示が有効な場合は詰めろチェックも行う
         await this.EngineService.AnalyzePositionAsync(
             board,
-            currentPlayer,
-            senteCaptured,
-            goteCaptured,
-            multiPv: multiPv,
-            checkThreatening: this.ShowHasMate);
+            currentTurn,
+            firstCaptured,
+            secondCaptured,
+            this.GameService.MoveTree,
+            multiPv: multiPv);
     }
 
     private void ToggleBoardFlip()
@@ -516,8 +429,8 @@ public partial class Index : IAsyncDisposable
         var kif = KifExporter.Export(
             moves,
             this.GameService.State.Status,
-            this.SenteNickname,
-            this.GoteNickname,
+            this.FirstNickname,
+            this.SecondNickname,
             this.GameService.State.Times);
         var fileName = $"shogi_{DateTime.Now:yyyyMMdd_HHmmss}.kif";
         await this.JS.InvokeVoidAsync("downloadTextFile", fileName, kif);
@@ -573,7 +486,7 @@ public partial class Index : IAsyncDisposable
         // 相手に検討モード開始を通知（イベントハンドラで行う）
     }
 
-    private async ValueTask OnReviewStartedAsync(ImmutableList<Move> moveHistory)
+    private async ValueTask OnReviewStartedAsync(IReadOnlyList<Move> moveHistory)
     {
         // 検討モード開始を相手に通知
         await this.WebRtcService.SendReviewStartAsync(moveHistory);
@@ -624,16 +537,16 @@ public partial class Index : IAsyncDisposable
     }
 
     /// <summary>プレイヤーの累計時間を取得（現在の手番の経過時間を含む）</summary>
-    private TimeSpan GetPlayerTime(Player player)
+    private TimeSpan GetPlayerTime(Turn player)
     {
-        var totalTime = player == Player.Sente
-            ? this.GameService.State.SenteTotalTime
-            : this.GameService.State.GoteTotalTime;
+        var totalTime = player == Turn.First
+            ? this.GameService.State.FirstTotalTime
+            : this.GameService.State.SecondTotalTime;
 
         // 対局中で、このプレイヤーが現在の手番なら経過時間を加算
         if (this.GameService.State.Status == GameStatus.Playing &&
             !this.GameService.State.IsReviewing &&
-            this.GameService.State.CurrentPlayer == player) {
+            this.GameService.State.CurrentTurn == player) {
             totalTime += this._currentTurnElapsed;
         }
 
@@ -650,6 +563,8 @@ public partial class Index : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        this._disposed = true;
+
         if (this._uiTimer is not null) {
             await this._uiTimer.DisposeAsync();
         }
@@ -662,42 +577,78 @@ public partial class Index : IAsyncDisposable
 
     private void SubscribeToEvents()
     {
-        this.WebRtcService.OnMoveReceived += this.OnRemoteMoveReceivedAsync;
-        this.WebRtcService.OnGameStart += this.OnRemoteGameStartAsync;
-        this.WebRtcService.OnDataChannelReady += this.OnDataChannelReadyAsync;
-        this.WebRtcService.OnGameStartWithPlayers += this.OnGameStartWithPlayersAsync;
-        this.WebRtcService.OnResignReceived += this.OnRemoteResignReceivedAsync;
-        this.WebRtcService.OnGameStateRequested += this.OnGameStateRequestedAsync;
-        this.WebRtcService.OnGameStateSyncReceived += this.OnGameStateSyncReceivedAsync;
-        this.WebRtcService.OnBranchResumeReceived += this.OnBranchResumeReceivedAsync;
-        this.WebRtcService.OnRematchReceived += this.OnRematchReceivedAsync;
-        this.WebRtcService.OnReviewStartReceived += this.OnReviewStartReceivedAsync;
-        this.WebRtcService.OnReviewMoveReceived += this.OnReviewMoveReceivedAsync;
-        this.WebRtcService.OnBecameHost += this.OnBecameHostAsync;
-        this.GameService.OnStateChangedAsync += this.OnGameStateChangedAsync;
-        this.GameService.OnBranchResumedAsync += this.OnBranchResumedAsync;
-        this.GameService.OnReviewStartedAsync += this.OnReviewStartedAsync;
-        this.GameService.OnReviewMoveAsync += this.OnReviewMoveAsync;
+        // ゲーム関連イベント（WebRtcService）- R3
+        this.WebRtcService.MoveReceived
+            .SubscribeAwait(async (data, _) => await this.OnRemoteMoveReceivedAsync(data.Move, data.Elapsed))
+            .AddTo(this._disposables);
+
+        this.WebRtcService.GameStartReceived
+            .SubscribeAwait(async (_, _) => await this.OnRemoteGameStartAsync())
+            .AddTo(this._disposables);
+
+        this.WebRtcService.GameStartWithPlayersReceived
+            .SubscribeAwait(async (info, _) => await this.OnGameStartWithPlayersAsync(info))
+            .AddTo(this._disposables);
+
+        this.WebRtcService.ResignReceived
+            .SubscribeAwait(async (_, _) => await this.OnRemoteResignReceivedAsync())
+            .AddTo(this._disposables);
+
+        this.WebRtcService.GameStateSyncReceived
+            .SubscribeAwait(async (info, _) => await this.OnGameStateSyncReceivedAsync(info))
+            .AddTo(this._disposables);
+
+        this.WebRtcService.BranchResumeReceived
+            .SubscribeAwait(async (moves, _) => await this.OnBranchResumeReceivedAsync(moves))
+            .AddTo(this._disposables);
+
+        this.WebRtcService.RematchReceived
+            .SubscribeAwait(async (moves, _) => await this.OnRematchReceivedAsync(moves))
+            .AddTo(this._disposables);
+
+        this.WebRtcService.ReviewStartReceived
+            .SubscribeAwait(async (moves, _) => await this.OnReviewStartReceivedAsync(moves))
+            .AddTo(this._disposables);
+
+        this.WebRtcService.ReviewMoveReceived
+            .SubscribeAwait(async (move, _) => await this.OnReviewMoveReceivedAsync(move))
+            .AddTo(this._disposables);
+
+        // ロビー関連イベント（LobbyService）- R3
+        this.Lobby.Ready
+            .SubscribeAwait(async (_, _) => await this.OnDataChannelReadyAsync())
+            .AddTo(this._disposables);
+
+        this.Lobby.BecameHost
+            .Subscribe(_ => Console.WriteLine("Became host"))
+            .AddTo(this._disposables);
+
+        // ゲームサービスイベント - R3
+        this.GameService.StateChanged
+            .SubscribeAwait(async (_, _) => await this.OnGameStateChangedAsync())
+            .AddTo(this._disposables);
+
+        this.GameService.BranchResumed
+            .SubscribeAwait(async (moves, _) => await this.OnBranchResumedAsync(moves))
+            .AddTo(this._disposables);
+
+        this.GameService.ReviewStarted
+            .SubscribeAwait(async (moves, _) => await this.OnReviewStartedAsync(moves))
+            .AddTo(this._disposables);
+
+        this.GameService.ReviewMove
+            .SubscribeAwait(async (move, _) => await this.OnReviewMoveAsync(move))
+            .AddTo(this._disposables);
+
+        // エンジンサービス - R3
+        this.EngineService.EvaluationUpdated
+            .SubscribeAwait(async (_, _) => await this.OnEvaluationUpdatedAsync())
+            .AddTo(this._disposables);
     }
 
     private void UnsubscribeFromEvents()
     {
-        this.WebRtcService.OnMoveReceived -= this.OnRemoteMoveReceivedAsync;
-        this.WebRtcService.OnGameStart -= this.OnRemoteGameStartAsync;
-        this.WebRtcService.OnDataChannelReady -= this.OnDataChannelReadyAsync;
-        this.WebRtcService.OnGameStartWithPlayers -= this.OnGameStartWithPlayersAsync;
-        this.WebRtcService.OnResignReceived -= this.OnRemoteResignReceivedAsync;
-        this.WebRtcService.OnGameStateRequested -= this.OnGameStateRequestedAsync;
-        this.WebRtcService.OnGameStateSyncReceived -= this.OnGameStateSyncReceivedAsync;
-        this.WebRtcService.OnBranchResumeReceived -= this.OnBranchResumeReceivedAsync;
-        this.WebRtcService.OnRematchReceived -= this.OnRematchReceivedAsync;
-        this.WebRtcService.OnReviewStartReceived -= this.OnReviewStartReceivedAsync;
-        this.WebRtcService.OnReviewMoveReceived -= this.OnReviewMoveReceivedAsync;
-        this.WebRtcService.OnBecameHost -= this.OnBecameHostAsync;
-        this.GameService.OnStateChangedAsync -= this.OnGameStateChangedAsync;
-        this.GameService.OnBranchResumedAsync -= this.OnBranchResumedAsync;
-        this.GameService.OnReviewStartedAsync -= this.OnReviewStartedAsync;
-        this.GameService.OnReviewMoveAsync -= this.OnReviewMoveAsync;
-        this.EngineService.OnEvaluationUpdated -= this.OnEvaluationUpdatedAsync;
+        // R3 購読は _disposables.Dispose() で解除
+        this._disposables.Dispose();
     }
 }

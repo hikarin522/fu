@@ -18,7 +18,7 @@
                     break;
                 case GameStatus.Reviewing:
                     <span class="turn-indicator review-mode">
-                        検討中 - @(GameService.State.CurrentPlayer == Player.Sente ? "先手" : "後手")番
+                        検討中 - @(GameService.State.CurrentTurn == Turn.First ? "先手" : "後手")番
                     </span>
                     break;
                 case var status when status.GetResultMessage() is { } message:
@@ -40,10 +40,9 @@
         {
             <div class="error-message">初期化エラー: @InitError</div>
         }
-        else if (!WebRtcService.IsConnected)
+        else if (!Lobby.IsConnected)
         {
             <ConnectionPanel
-                WebRtcService="WebRtcService"
                 OnConnected="StateHasChanged"
                 InitialRoomId="@RoomIdParam"
                 BaseUrl="@BaseUrl" />
@@ -56,22 +55,22 @@
 
                 <div class="player-select-section">
                     <label>先手:</label>
-                    <select @bind="SelectedSentePeerId">
+                    <select @bind="SelectedFirstPlayerIdString">
                         <option value="">-- 選択 --</option>
-                        @foreach (var p in WebRtcService.Participants)
+                        @foreach (var p in Lobby.Participants)
                         {
-                            <option value="@p.PeerId">@p.Nickname @(p.PeerId == WebRtcService.MyPeerId ? "(自分)" : "")</option>
+                            <option value="@p.PlayerId.AsPrimitive()">@p.Nickname @(p.PlayerId == Lobby.MyPlayerId ? "(自分)" : "")</option>
                         }
                     </select>
                 </div>
 
                 <div class="player-select-section">
                     <label>後手:</label>
-                    <select @bind="SelectedGotePeerId">
+                    <select @bind="SelectedSecondPlayerIdString">
                         <option value="">-- 選択 --</option>
-                        @foreach (var p in WebRtcService.Participants)
+                        @foreach (var p in Lobby.Participants)
                         {
-                            <option value="@p.PeerId">@p.Nickname @(p.PeerId == WebRtcService.MyPeerId ? "(自分)" : "")</option>
+                            <option value="@p.PlayerId.AsPrimitive()">@p.Nickname @(p.PlayerId == Lobby.MyPlayerId ? "(自分)" : "")</option>
                         }
                     </select>
                 </div>
@@ -101,7 +100,7 @@
 
                 <div class="dialog-buttons">
                     <button class="btn primary" @onclick="StartNewGameAsync"
-                            disabled="@(string.IsNullOrEmpty(SelectedSentePeerId) || string.IsNullOrEmpty(SelectedGotePeerId) || SelectedSentePeerId == SelectedGotePeerId)">
+                            disabled="@(SelectedFirstPlayerId is null || SelectedSecondPlayerId is null || SelectedFirstPlayerId == SelectedSecondPlayerId)">
                         対局開始
                     </button>
                     <button class="btn" @onclick="() => ShowNewGameDialog = false">キャンセル</button>
@@ -113,11 +112,11 @@
             <div class="game-area">
                 <div class="player-info opponent">
                     <span class="player-label">
-                        @(IsFlipped ? SenteNickname : GoteNickname)
+                        @(IsFlipped ? FirstNickname : SecondNickname)
                         (@(IsFlipped ? "先手" : "後手"))
                     </span>
                     <span class="player-time">
-                        @FormatTime(GetPlayerTime(IsFlipped ? Player.Sente : Player.Gote))
+                        @FormatTime(GetPlayerTime(IsFlipped ? Turn.First : Turn.Second))
                     </span>
                 </div>
 
@@ -127,11 +126,11 @@
                     OnMoveMade="OnMoveMade"
                     IsFlipped="IsFlipped"
                     CandidateMoves="@(ShowCandidateArrows ? EngineService.Candidates : null)"
-                    CandidateMovePlayer="GameService.State.CurrentPlayer" />
+                    CandidateMoveTurn="GameService.State.CurrentTurn" />
 
                 <div class="player-info self">
                     <span class="player-label">
-                        @(IsFlipped ? GoteNickname : SenteNickname)
+                        @(IsFlipped ? SecondNickname : FirstNickname)
                         (@(IsFlipped ? "後手" : "先手"))
                         @if (IsPlayer)
                         {
@@ -139,7 +138,7 @@
                         }
                     </span>
                     <span class="player-time">
-                        @FormatTime(GetPlayerTime(IsFlipped ? Player.Gote : Player.Sente))
+                        @FormatTime(GetPlayerTime(IsFlipped ? Turn.Second : Turn.First))
                     </span>
                 </div>
 
@@ -203,7 +202,7 @@
         }
     </main>
 
-    @if (WebRtcService.IsConnected && !ShowNewGameDialog && GameService.State.Status != GameStatus.WaitingForConnection)
+    @if (Lobby.IsConnected && !ShowNewGameDialog && GameService.State.Status != GameStatus.WaitingForConnection)
     {
     <div class="move-history">
         <div class="move-history-header">
@@ -243,7 +242,7 @@
             <button class="btn-small btn-review" @onclick="StartReviewFromCurrentAsync">ここから検討</button>
         }
         <MoveTreeView
-            MoveTree="GameService.State.MoveTree"
+            MoveTree="GameService.MoveTree"
             MoveHistory="GameService.State.DisplayBranchHistory"
             DisplayMoveIndex="GameService.State.DisplayMoveIndex"
             OnNodeSelected="OnTreeNodeSelected" />

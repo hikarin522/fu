@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
+using R3;
+
+using Fu.Core.Abstractions;
 using Fu.Core.Models;
 using Fu.Services;
 
@@ -8,19 +11,21 @@ namespace Fu.Components;
 
 public partial class ConnectionPanel : IDisposable
 {
-    [Parameter] public WebRtcService WebRtcService { get; set; } = null!;
+    private readonly CompositeDisposable _disposables = [];
+
     [Parameter] public EventCallback OnConnected { get; set; }
     [Parameter] public string? InitialRoomId { get; set; }
     [Parameter] public string BaseUrl { get; set; } = "";
 
+    [Inject] private LobbyService Lobby { get; set; } = null!;
     [Inject] private IJSRuntime JS { get; set; } = null!;
     [Inject] private NavigationManager Navigation { get; set; } = null!;
 
-    private ConnectionState ConnectionState => this.WebRtcService?.State ?? ConnectionState.Disconnected;
+    private TransportConnectionState ConnectionState => this.Lobby?.ConnectionState ?? TransportConnectionState.Disconnected;
 
     private string Nickname { get; set; } = "";
     private string InputNickname { get; set; } = "";
-    private string RoomId { get; set; } = "";
+    private RoomId? RoomId { get; set; }
     private string InputRoomId { get; set; } = "";
     private string ErrorMessage { get; set; } = "";
     private bool IsProcessing { get; set; }
@@ -28,16 +33,23 @@ public partial class ConnectionPanel : IDisposable
     private bool IsJoiningRoom { get; set; }
     private string? SavedPeerId { get; set; }
 
-    private string RoomUrl => string.IsNullOrEmpty(this.RoomId) ? "" : $"{this.BaseUrl}{this.RoomId}";
+    private string RoomUrl => this.RoomId is null ? "" : $"{this.BaseUrl}{this.RoomId.Value.AsPrimitive()}";
     private bool HasInitialRoomId => !string.IsNullOrEmpty(this.InitialRoomId);
 
     protected override void OnInitialized()
     {
-        if (this.WebRtcService is not null) {
-            this.WebRtcService.OnStateChanged += this.OnStateChangedAsync;
-            this.WebRtcService.OnParticipantJoined += this.OnParticipantChangedAsync;
-            this.WebRtcService.OnParticipantLeft += this.OnParticipantLeftAsync;
-        }
+        // R3 で購読
+        this.Lobby.ConnectionStateChanged
+            .Subscribe(this.OnStateChanged)
+            .AddTo(this._disposables);
+
+        this.Lobby.ParticipantJoined
+            .Subscribe(_ => this.InvokeAsync(this.StateHasChanged))
+            .AddTo(this._disposables);
+
+        this.Lobby.ParticipantLeft
+            .Subscribe(_ => this.InvokeAsync(this.StateHasChanged))
+            .AddTo(this._disposables);
 
         // URL パラメータからルーム ID が指定されている場合は設定
         if (this.HasInitialRoomId) {
@@ -78,25 +90,15 @@ public partial class ConnectionPanel : IDisposable
 
     private sealed record GameSessionData(string RoomId, string Nickname, string? PeerId, long Timestamp);
 
-    private async Task OnStateChangedAsync(ConnectionState state)
+    private void OnStateChanged(TransportConnectionState state)
     {
-        await this.InvokeAsync(async () => {
-            if (state == ConnectionState.Connected && !this.HasNotifiedConnected) {
+        this.InvokeAsync(async () => {
+            if (state == TransportConnectionState.Connected && !this.HasNotifiedConnected) {
                 this.HasNotifiedConnected = true;
                 await this.OnConnected.InvokeAsync();
             }
             this.StateHasChanged();
         });
-    }
-
-    private Task OnParticipantChangedAsync(Participant participant)
-    {
-        return this.InvokeAsync(this.StateHasChanged);
-    }
-
-    private Task OnParticipantLeftAsync(string peerId)
-    {
-        return this.InvokeAsync(this.StateHasChanged);
     }
 
     private async Task ShowJoinForm()
@@ -114,25 +116,25 @@ public partial class ConnectionPanel : IDisposable
     private Task CreateRoomWithNickname() => this.ExecuteWithProcessing(async () => {
         this.Nickname = this.InputNickname.Trim();
         await this.SaveNicknameAsync(this.Nickname);
-        this.RoomId = (await this.WebRtcService.CreateRoomAsync(this.Nickname)).AsPrimitive();
-        this.UpdateUrlWithRoomId(this.RoomId);
+        this.RoomId = await this.Lobby.CreateRoomAsync(this.Nickname);
+        this.UpdateUrlWithRoomId(this.RoomId!.Value);
     });
 
     private Task JoinRoomWithNickname() => this.ExecuteWithProcessing(async () => {
         this.Nickname = this.InputNickname.Trim();
         await this.SaveNicknameAsync(this.Nickname);
-        var roomId = this.InputRoomId.Trim().ToUpperInvariant();
-        await this.WebRtcService.JoinRoomAsync(new RoomId(roomId), this.Nickname);
-        this.UpdateUrlWithRoomId(roomId);
+        this.RoomId = new RoomId(this.InputRoomId.Trim().ToUpperInvariant());
+        await this.Lobby.JoinRoomAsync(this.RoomId.Value, this.Nickname);
+        this.UpdateUrlWithRoomId(this.RoomId.Value);
     });
 
     private Task JoinRoom() => this.ExecuteWithProcessing(async () => {
         if (string.IsNullOrWhiteSpace(this.InputRoomId)) {
             throw new InvalidOperationException("ルームIDを入力してください");
         }
-        var roomId = this.InputRoomId.Trim().ToUpperInvariant();
-        await this.WebRtcService.JoinRoomAsync(new RoomId(roomId), this.Nickname, this.SavedPeerId);
-        this.UpdateUrlWithRoomId(roomId);
+        this.RoomId = new RoomId(this.InputRoomId.Trim().ToUpperInvariant());
+        await this.Lobby.JoinRoomAsync(this.RoomId.Value, this.Nickname, this.SavedPeerId);
+        this.UpdateUrlWithRoomId(this.RoomId.Value);
         this.SavedPeerId = null; // 使用後はクリア
     });
 
@@ -155,7 +157,7 @@ public partial class ConnectionPanel : IDisposable
 
     private async Task Disconnect()
     {
-        await this.WebRtcService.DisconnectAsync();
+        await this.Lobby.DisconnectAsync();
         this.HasNotifiedConnected = false;
         this.ResetAll();
     }
@@ -164,7 +166,7 @@ public partial class ConnectionPanel : IDisposable
     {
         this.Nickname = "";
         this.InputNickname = "";
-        this.RoomId = "";
+        this.RoomId = null;
         this.InputRoomId = "";
         this.ErrorMessage = "";
         this.IsJoiningRoom = false;
@@ -175,27 +177,23 @@ public partial class ConnectionPanel : IDisposable
         await this.JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
     }
 
-    private void UpdateUrlWithRoomId(string roomId)
+    private void UpdateUrlWithRoomId(RoomId roomId)
     {
         // URLバーを更新（ページリロードなし）
-        var newUrl = $"{this.Navigation.BaseUri}{roomId}";
+        var newUrl = $"{this.Navigation.BaseUri}{roomId.AsPrimitive()}";
         this.Navigation.NavigateTo(newUrl, forceLoad: false, replace: true);
     }
 
     private string GetStatusText() => this.ConnectionState switch {
-        ConnectionState.Disconnected => "未接続",
-        ConnectionState.Connecting => "接続中",
-        ConnectionState.Connected => "接続済み",
+        TransportConnectionState.Disconnected => "未接続",
+        TransportConnectionState.Connecting => "接続中",
+        TransportConnectionState.Connected => "接続済み",
         _ => "不明"
     };
 
     public void Dispose()
     {
-        if (this.WebRtcService is not null) {
-            this.WebRtcService.OnStateChanged -= this.OnStateChangedAsync;
-            this.WebRtcService.OnParticipantJoined -= this.OnParticipantChangedAsync;
-            this.WebRtcService.OnParticipantLeft -= this.OnParticipantLeftAsync;
-        }
+        this._disposables.Dispose();
         GC.SuppressFinalize(this);
     }
 }

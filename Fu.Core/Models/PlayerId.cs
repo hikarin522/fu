@@ -3,7 +3,7 @@ using UnitGenerator;
 namespace Fu.Core.Models;
 
 /// <summary>
-/// P2P接続のルームIDを表す値オブジェクト
+/// プレイヤー（参加者）を識別するID
 /// </summary>
 [UnitOf<string>(UnitGenerateOptions.JsonConverter | UnitGenerateOptions.JsonConverterDictionaryKeySupport)]
-public readonly partial struct RoomId;
+public readonly partial struct PlayerId;

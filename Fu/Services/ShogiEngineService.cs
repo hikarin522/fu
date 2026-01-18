@@ -1,53 +1,40 @@
 using Microsoft.JSInterop;
 
+using R3;
+
+using Fu.Core;
+using Fu.Core.Abstractions;
 using Fu.Core.Models;
 
 namespace Fu.Services;
-
-/// <summary>
-/// 候補手の情報
-/// </summary>
-public record CandidateMove(
-    int Rank,
-    string Move,
-    int? Evaluation,
-    int? MateIn,
-    string? PrincipalVariation
-);
-
-/// <summary>
-/// 局面のキャッシュされた評価情報
-/// </summary>
-public record CachedEvaluation(
-    int? Evaluation,
-    int? MateIn,
-    string? BestMove,
-    string? PrincipalVariation,
-    int Depth,
-    IReadOnlyList<CandidateMove> Candidates
-);
 
 /// <summary>
 /// YaneuraOu WASM エンジンとのインターフェース
 /// </summary>
 public class ShogiEngineService : IAsyncDisposable
 {
+    /// <summary>詰みスコアの基準値（USIプロトコル）</summary>
+    private const int MateScoreBase = 30000;
+
     private readonly IJSRuntime _jsRuntime;
+    private readonly Subject<Unit> _evaluationUpdated = new();
     private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
     private bool _initialized;
     private bool _isAnalyzing;
     private readonly Dictionary<int, CandidateMove> _candidates = [];
     private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
     private int _newDepthCandidateCount;
+    private int _lastMultiPv;
 
-    // 局面キャッシュ（SFEN -> 評価情報）
-    private readonly Dictionary<string, CachedEvaluation> _cache = [];
-    private const int MaxCacheSize = 100;
-    private string? _currentSfen;
-    private Player _currentPlayer = Player.Sente; // 現在分析中の手番
-    private int _analysisVersion; // 分析バージョン（古い結果を無視するため）
-    private int _currentAnalysisVersion; // 現在処理中の分析バージョン
-    private int _threateningVersion; // 詰めろチェックバージョン（中断された詰めろチェックの結果を無視するため）
+    // 現在分析中のノード情報
+    private MoveTree? _currentMoveTree;
+    private MoveNode? _currentNode; // nullは開始局面
+    private Turn _currentTurn = Turn.First;
+
+    // 最後に分析を開始したノード（結果が遅延して届いた時にキャッシュ更新に使用）
+    private MoveTree? _lastAnalyzedMoveTree;
+    private MoveNode? _lastAnalyzedNode;
+    private Turn _lastAnalyzedTurn;
 
     /// <summary>現在の評価値（先手から見た値、センチポーン）</summary>
     public int? Evaluation { get; private set; }
@@ -56,16 +43,7 @@ public class ShogiEngineService : IAsyncDisposable
     public int? MateIn { get; private set; }
 
     /// <summary>詰みを見つけた時の手番</summary>
-    public Player MatePlayer { get; private set; }
-
-    /// <summary>詰めろ状態（相手が受けなければ次に詰む）</summary>
-    public bool IsThreatening { get; private set; }
-
-    /// <summary>詰めろの詰み手数</summary>
-    public int? ThreateningMateIn { get; private set; }
-
-    /// <summary>詰めろがかかっている側</summary>
-    public Player ThreateningPlayer { get; private set; }
+    public Turn MateTurn { get; private set; }
 
     /// <summary>最善手</summary>
     public string? BestMove { get; private set; }
@@ -89,8 +67,8 @@ public class ShogiEngineService : IAsyncDisposable
     /// <summary>分析中か</summary>
     public bool IsAnalyzing => this._isAnalyzing;
 
-    /// <summary>評価値が更新された時のイベント</summary>
-    public event Func<Task>? OnEvaluationUpdated;
+    /// <summary>評価値が更新された時</summary>
+    public Observable<Unit> EvaluationUpdated => this._evaluationUpdated;
 
     public ShogiEngineService(IJSRuntime jsRuntime) => this._jsRuntime = jsRuntime;
 
@@ -133,47 +111,40 @@ public class ShogiEngineService : IAsyncDisposable
         }
     }
 
-    /// <summary>局面を分析</summary>
+    /// <summary>局面を分析（MoveTreeベース）</summary>
     /// <param name="depth">探索深さ（0 = 無限探索）</param>
-    public async Task AnalyzePositionAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured, int depth = 0, int multiPv = 1, bool checkThreatening = false)
+    public async Task AnalyzePositionAsync(
+        Board board,
+        Turn currentTurn,
+        CapturedPieces firstCaptured,
+        CapturedPieces secondCaptured,
+        MoveTree moveTree,
+        int depth = 0,
+        int multiPv = 1)
     {
         if (!this.IsAvailable) {
             return;
         }
 
-        var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
-        this._currentSfen = sfen;
-        this._currentPlayer = currentPlayer;
+        var currentNode = moveTree.CurrentNode;
 
-        // 詰めろチェック中なら中断
-        if (this._isCheckingThreatening) {
-            this._isCheckingThreatening = false;
-            this._threateningSfen = null;
-            this._threateningVersion++; // 中断された詰めろチェックの結果を無視するため
-            // エンジンを停止して詰めろチェックの結果を破棄
-            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
-        }
+        // 現在のノードと最後に分析したノードを記録
+        this._currentMoveTree = moveTree;
+        this._currentNode = currentNode;
+        this._currentTurn = currentTurn;
 
-        // 詰めろチェックをリセット（新しい局面では常にリセット）
-        this.IsThreatening = false;
-        this.ThreateningMateIn = null;
+        this._lastAnalyzedMoveTree = moveTree;
+        this._lastAnalyzedNode = currentNode;
+        this._lastAnalyzedTurn = currentTurn;
 
-        // 新しい分析バージョンを開始（古い結果を無視するため）
-        this._analysisVersion++;
-
-        // キャッシュをチェック
-        if (this._cache.TryGetValue(sfen, out var cached)) {
+        // ノードのキャッシュをチェック
+        var cached = GetCachedEvaluationFromNode(moveTree, currentNode);
+        if (cached is not null) {
             // キャッシュから復元（即座に表示）
             this.RestoreFromCache(cached);
-            if (OnEvaluationUpdated is { } h) {
-                await h();
-            }
+            this._evaluationUpdated.OnNext(Unit.Default);
             // 無限探索の場合は継続、深さ指定の場合はキャッシュ深さ以上ならスキップ
             if (depth > 0 && cached.Depth >= depth) {
-                // 詰めろチェックが有効で、まだ詰みがない場合は相手番で分析
-                if (checkThreatening && !this._isCheckingThreatening && this.MateIn is null) {
-                    await this.CheckThreateningAsync(board, currentPlayer, senteCaptured, goteCaptured);
-                }
                 return;
             }
             // 継続して分析する場合、キャッシュの深さから継続（新しい結果は上書きされる）
@@ -189,45 +160,38 @@ public class ShogiEngineService : IAsyncDisposable
         }
 
         this._isAnalyzing = true;
-        this._checkThreateningAfterAnalysis = checkThreatening;
-        this._threateningContext = checkThreatening ? (board, currentPlayer, senteCaptured, goteCaptured) : null;
 
-        // MultiPVを設定（常に送信して状態を確実に同期）
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
+        // MultiPVを設定（値が変わった時のみ送信）
+        if (multiPv != this._lastMultiPv) {
+            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
+            this._lastMultiPv = multiPv;
+        }
 
-        // depth=0 で無限探索
+        // SFEN生成してエンジンに送信
+        var sfen = SfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
     }
 
-    // 詰めろチェック用のフラグ
-    private bool _isCheckingThreatening;
-    private bool _checkThreateningAfterAnalysis;
-    private (Board board, Player player, CapturedPieces sente, CapturedPieces gote)? _threateningContext;
-    private string? _threateningSfen;
+    /// <summary>ノードからキャッシュを取得</summary>
+    private static CachedEvaluation? GetCachedEvaluationFromNode(MoveTree moveTree, MoveNode? node) =>
+        node is not null ? node.CachedEvaluation : moveTree.RootEvaluation;
 
-    /// <summary>詰めろをチェック（相手番として分析）</summary>
-    private async Task CheckThreateningAsync(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
+    /// <summary>ノードにキャッシュを保存</summary>
+    private static void SetCachedEvaluationToNode(MoveTree moveTree, MoveNode? node, CachedEvaluation cached)
     {
-        if (!this.IsAvailable || this._isCheckingThreatening) {
-            return;
+        if (node is not null) {
+            node.CachedEvaluation = cached;
         }
-
-        // 相手番として局面を生成
-        var opponentPlayer = currentPlayer == Player.Sente ? Player.Gote : Player.Sente;
-        var sfen = ToSfen(board, opponentPlayer, senteCaptured, goteCaptured);
-        this._threateningSfen = sfen;
-        this._isCheckingThreatening = true;
-        this._currentThreateningVersion = this._threateningVersion; // バージョンを同期
-
-        // 浅い探索で詰みがあるかチェック（詰み探索用に深さ15程度）
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "setoption name MultiPV value 1");
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, 15);
+        else {
+            moveTree.RootEvaluation = cached;
+        }
     }
 
     private void RestoreFromCache(CachedEvaluation cached)
     {
         this.Evaluation = cached.Evaluation;
         this.MateIn = cached.MateIn;
+        this.MateTurn = cached.MateTurn;
         this.BestMove = cached.BestMove;
         this.PrincipalVariation = cached.PrincipalVariation;
         this.Depth = cached.Depth;
@@ -237,30 +201,23 @@ public class ShogiEngineService : IAsyncDisposable
         }
     }
 
-    private void SaveToCache(string sfen)
+    private void SaveToCurrentNode()
     {
-        // キャッシュサイズ制限
-        if (this._cache.Count >= MaxCacheSize) {
-            // 最も古いエントリを削除（簡易的な実装）
-            var oldestKey = this._cache.Keys.First();
-            this._cache.Remove(oldestKey);
+        if (this._currentMoveTree is null) {
+            return;
         }
 
-        this._cache[sfen] = new CachedEvaluation(
+        var cached = new CachedEvaluation(
             this.Evaluation,
             this.MateIn,
+            this.MateTurn,
             this.BestMove,
             this.PrincipalVariation,
             this.Depth,
             this.Candidates
         );
-    }
 
-    /// <summary>指定した局面のキャッシュを取得</summary>
-    public CachedEvaluation? GetCachedEvaluation(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
-    {
-        var sfen = ToSfen(board, currentPlayer, senteCaptured, goteCaptured);
-        return this._cache.GetValueOrDefault(sfen);
+        SetCachedEvaluationToNode(this._currentMoveTree, this._currentNode, cached);
     }
 
     /// <summary>分析を停止</summary>
@@ -276,82 +233,27 @@ public class ShogiEngineService : IAsyncDisposable
 
     /// <summary>エンジンからのメッセージを処理</summary>
     [JSInvokable]
-    public async Task OnEngineMessage(string message)
+    public Task OnEngineMessage(string message)
     {
         // USIプロトコルのメッセージをパース
         if (message.StartsWith("info ", StringComparison.Ordinal)) {
-            if (this._isCheckingThreatening) {
-                // 詰めろチェック中のメッセージを処理
-                this.ParseThreateningInfoMessage(message);
-            }
-            else {
-                this.ParseInfoMessage(message);
-            }
-            if (OnEvaluationUpdated is { } handler) {
-                await handler();
-            }
+            this.ParseInfoMessage(message);
+            this._evaluationUpdated.OnNext(Unit.Default);
         }
         else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
-            if (this._isCheckingThreatening) {
-                // 詰めろチェック完了
-                this._isCheckingThreatening = false;
-                this._threateningSfen = null;
+            var parts = message.Split(' ');
+            if (parts.Length >= 2) {
+                this.BestMove = parts[1];
             }
-            else {
-                var parts = message.Split(' ');
-                if (parts.Length >= 2) {
-                    this.BestMove = parts[1];
-                }
-                this._isAnalyzing = false;
+            this._isAnalyzing = false;
 
-                // 探索完了時にキャッシュに保存
-                if (this._currentSfen is not null) {
-                    this.SaveToCache(this._currentSfen);
-                }
+            // 探索完了時にキャッシュに保存
+            this.SaveToCurrentNode();
 
-                // 詰めろチェックが有効で、詰みがない場合は相手番で分析
-                if (this._checkThreateningAfterAnalysis && this.MateIn is null && this._threateningContext is { } ctx) {
-                    this._checkThreateningAfterAnalysis = false;
-                    await this.CheckThreateningAsync(ctx.board, ctx.player, ctx.sente, ctx.gote);
-                }
-                this._threateningContext = null;
-            }
-
-            if (OnEvaluationUpdated is { } handler) {
-                await handler();
-            }
-        }
-    }
-
-    private int _currentThreateningVersion; // 現在処理中の詰めろチェックバージョン
-
-    private void ParseThreateningInfoMessage(string message)
-    {
-        var parts = message.Split(' ');
-        var info = ParseUsiInfo(parts);
-
-        // 中断された詰めろチェックの結果は無視
-        if (this._currentThreateningVersion != this._threateningVersion) {
-            return;
+            this._evaluationUpdated.OnNext(Unit.Default);
         }
 
-        // 本局面で既に詰みがある場合は詰めろを設定しない
-        if (this.MateIn.HasValue) {
-            return;
-        }
-
-        // 詰みが見つかった場合
-        if (info.MateIn.HasValue && info.MateIn.Value > 0) {
-            // 詰めろとして設定（相手番で詰みあり = 元の手番側が詰めろ）
-            this.IsThreatening = true;
-            this.ThreateningMateIn = info.MateIn.Value;
-            this.ThreateningPlayer = this._currentPlayer;
-
-            // 本局面の分析結果が誤ってここに来た可能性も考慮して、MateIn も設定
-            // （タイミングの問題で本局面の詰み結果がここで処理される場合がある）
-            this.MateIn = info.MateIn.Value;
-            this.MatePlayer = this._currentPlayer;
-        }
+        return Task.CompletedTask;
     }
 
     private void ParseInfoMessage(string message)
@@ -359,22 +261,15 @@ public class ShogiEngineService : IAsyncDisposable
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
 
-        // 現在の分析バージョンより古い結果は無視（局面変更後の古い結果が来た場合）
-        if (this._currentAnalysisVersion != this._analysisVersion) {
-            // まだ現在バージョンの結果を受け取っていない場合、depth=1で同期
-            if (info.Depth.HasValue && info.Depth.Value == 1 && this._currentAnalysisVersion < this._analysisVersion) {
-                // 新しい分析バージョンの最初の結果
-                this._currentAnalysisVersion = this._analysisVersion;
-                // 新しい分析なので状態をリセット
-                this.Depth = 0;
-                this.MateIn = null;
-                this.IsThreatening = false;
-                this.ThreateningMateIn = null;
-            }
-            else {
-                // 古い分析の結果は無視
-                return;
-            }
+        // 現在の局面の結果かどうか判定（同じノードかどうか）
+        var isCurrentPosition = this._currentMoveTree is not null
+            && ReferenceEquals(this._lastAnalyzedMoveTree, this._currentMoveTree)
+            && ReferenceEquals(this._lastAnalyzedNode, this._currentNode);
+
+        if (!isCurrentPosition) {
+            // 現在の局面ではない場合、最後に分析したノードのキャッシュを更新（UI更新はしない）
+            this.UpdateCacheOnly(info);
+            return;
         }
 
         // 深さがない、または現在より深い場合のみメイン評価値を更新
@@ -393,11 +288,11 @@ public class ShogiEngineService : IAsyncDisposable
         // - 先手番の局面を分析 → 先手目線のスコア → 変換不要
         // - 後手番の局面を分析 → 後手目線のスコア → 符号反転で先手視点に変換
         // ※プレイヤーが誰か（先手側/後手側）は関係なく、分析対象の局面の手番で決まる
-        var normalizedScore = this._currentPlayer == Player.Gote ? -info.Score : info.Score;
+        var normalizedScore = this._currentTurn == Turn.Second ? -info.Score : info.Score;
 
         // デバッグ用：変換前後の値をログ出力
         if (info.Score.HasValue) {
-            Console.WriteLine($"[Eval] Player={this._currentPlayer}, Raw={info.Score}, Normalized={normalizedScore}, Depth={info.Depth}");
+            Console.WriteLine($"[Eval] Turn={this._currentTurn}, Raw={info.Score}, Normalized={normalizedScore}, Depth={info.Depth}");
         }
 
         // メインの評価値を更新（multipv=1または指定なしの場合、かつ新しい深さの場合または詰みが見つかった場合）
@@ -412,10 +307,7 @@ public class ShogiEngineService : IAsyncDisposable
             // 詰みは手番視点でそのまま保存
             if (info.MateIn.HasValue) {
                 this.MateIn = info.MateIn.Value;
-                this.MatePlayer = this._currentPlayer;
-                // 詰みが検出されたら詰めろをリセット（詰みと詰めろは排他）
-                this.IsThreatening = false;
-                this.ThreateningMateIn = null;
+                this.MateTurn = this._currentTurn;
             }
             else if (isNewDepth) {
                 // 新しい深さで詰みがない場合のみリセット
@@ -439,7 +331,7 @@ public class ShogiEngineService : IAsyncDisposable
 
         // 候補手リストを更新（現在の深さ以上の結果のみ）
         // 候補手の詰みも手番視点で正規化（正=手番側勝ち → 先手視点に変換）
-        var normalizedMate = this._currentPlayer == Player.Gote ? -info.MateIn : info.MateIn;
+        var normalizedMate = this._currentTurn == Turn.Second ? -info.MateIn : info.MateIn;
         if (info.MultiPv.HasValue && info.Move is not null && info.Depth.HasValue && info.Depth.Value >= this.Depth) {
             this._candidates[info.MultiPv.Value] = new CandidateMove(
                 info.MultiPv.Value,
@@ -449,6 +341,40 @@ public class ShogiEngineService : IAsyncDisposable
                 info.Pv
             );
             this._newDepthCandidateCount = this._candidates.Count;
+        }
+    }
+
+    /// <summary>過去の局面の解析結果をキャッシュに反映（UI更新なし）</summary>
+    private void UpdateCacheOnly((int? MultiPv, int? Depth, int? Score, int? MateIn, string? Pv, string? Move) info)
+    {
+        // 深さ情報がない、multipv=1以外の場合、または最後に分析した局面がない場合は無視
+        if (!info.Depth.HasValue || (info.MultiPv.HasValue && info.MultiPv.Value != 1) || this._lastAnalyzedMoveTree is null) {
+            return;
+        }
+
+        var moveTree = this._lastAnalyzedMoveTree;
+        var node = this._lastAnalyzedNode;
+        var turn = this._lastAnalyzedTurn;
+
+        // キャッシュが存在し、より深い結果であれば更新
+        var cached = GetCachedEvaluationFromNode(moveTree, node);
+        if (cached is not null && info.Depth.Value > cached.Depth) {
+            var normalizedScore = turn == Turn.Second ? -info.Score : info.Score;
+            var normalizedMate = turn == Turn.Second ? -info.MateIn : info.MateIn;
+
+            var newCached = new CachedEvaluation(
+                normalizedScore ?? cached.Evaluation,
+                normalizedMate ?? cached.MateIn,
+                cached.MateTurn,
+                info.Move ?? cached.BestMove,
+                info.Pv ?? cached.PrincipalVariation,
+                info.Depth.Value,
+                cached.Candidates // 候補手は維持
+            );
+
+            SetCachedEvaluationToNode(moveTree, node, newCached);
+
+            Console.WriteLine($"[Cache] Updated cache for old position: depth={info.Depth}, node={node?.Depth ?? 0}");
         }
     }
 
@@ -470,7 +396,7 @@ public class ShogiEngineService : IAsyncDisposable
                         score = cp;
                     }
                     else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
-                        score = mate > 0 ? 30000 - mate : -30000 - mate;
+                        score = mate > 0 ? MateScoreBase - mate : -MateScoreBase - mate;
                         mateIn = mate;
                     }
                     break;
@@ -511,121 +437,9 @@ public class ShogiEngineService : IAsyncDisposable
         return [.. result.OrderBy(c => c.Rank)];
     }
 
-    /// <summary>盤面をSFEN形式に変換</summary>
-    private static string ToSfen(Board board, Player currentPlayer, CapturedPieces senteCaptured, CapturedPieces goteCaptured)
-    {
-        var sb = new System.Text.StringBuilder();
-
-        // 盤面
-        for (var row = 0; row < 9; row++) {
-            var emptyCount = 0;
-            for (var col = 0; col < 9; col++) {
-                var piece = board[col, row];
-                if (piece is null) {
-                    emptyCount++;
-                }
-                else {
-                    if (emptyCount > 0) {
-                        sb.Append(emptyCount);
-                        emptyCount = 0;
-                    }
-                    sb.Append(PieceToSfen(piece));
-                }
-            }
-            if (emptyCount > 0) {
-                sb.Append(emptyCount);
-            }
-            if (row < 8) {
-                sb.Append('/');
-            }
-        }
-
-        // 手番
-        sb.Append(currentPlayer == Player.Sente ? " b " : " w ");
-
-        // 持ち駒
-        var captured = CapturedToSfen(senteCaptured, true) + CapturedToSfen(goteCaptured, false);
-        sb.Append(string.IsNullOrEmpty(captured) ? "-" : captured);
-
-        // 手数（常に1）
-        sb.Append(" 1");
-
-        return sb.ToString();
-    }
-
-    private static string PieceToSfen(Piece piece)
-    {
-        var basePiece = piece.Type.IsPromoted() ? piece.Type.GetUnpromotedType() : piece.Type;
-        var c = basePiece switch {
-            PieceType.King => "K", PieceType.Rook => "R", PieceType.Bishop => "B",
-            PieceType.Gold => "G", PieceType.Silver => "S", PieceType.Knight => "N",
-            PieceType.Lance => "L", PieceType.Pawn => "P", _ => ""
-        };
-        if (piece.Type.IsPromoted()) {
-            c = "+" + c;
-        }
-        return piece.Owner == Player.Sente ? c : c.ToLowerInvariant();
-    }
-
-    private static string CapturedToSfen(CapturedPieces captured, bool isSente)
-    {
-        var sb = new System.Text.StringBuilder();
-        void Append(int count, char c)
-        {
-            if (count > 0) {
-                if (count > 1) {
-                    sb.Append(count);
-                }
-                sb.Append(isSente ? c : char.ToLowerInvariant(c));
-            }
-        }
-
-        Append(captured.GetCount(PieceType.Rook), 'R');
-        Append(captured.GetCount(PieceType.Bishop), 'B');
-        Append(captured.GetCount(PieceType.Gold), 'G');
-        Append(captured.GetCount(PieceType.Silver), 'S');
-        Append(captured.GetCount(PieceType.Knight), 'N');
-        Append(captured.GetCount(PieceType.Lance), 'L');
-        Append(captured.GetCount(PieceType.Pawn), 'P');
-
-        return sb.ToString();
-    }
-
     /// <summary>SFEN形式の指し手をパースして移動元・移動先の座標を返す</summary>
-    /// <param name="sfenMove">SFEN形式の指し手（例: 7g7f, G*5b）</param>
-    /// <returns>移動元（駒打ちの場合はnull）、移動先、駒打ちの駒種類（打ちでない場合はnull）のタプル。パース失敗時はnull</returns>
-    public static ((int col, int row)? from, (int col, int row) to, char? dropPiece)? ParseSfenMove(string sfenMove)
-    {
-        if (string.IsNullOrEmpty(sfenMove)) {
-            return null;
-        }
-
-        // 駒打ちの場合（例: G*5b）
-        if (sfenMove.Length >= 4 && sfenMove[1] == '*') {
-            var toCol = sfenMove[2] - '1';
-            var toRow = sfenMove[3] - 'a';
-            if (toCol is >= 0 and < 9 && toRow is >= 0 and < 9) {
-                // SFEN列は1-9、内部は0-8。SFEN 1 = 内部 8, SFEN 9 = 内部 0
-                return (null, (8 - toCol, toRow), char.ToUpperInvariant(sfenMove[0]));
-            }
-            return null;
-        }
-
-        // 通常の移動（例: 7g7f, 7g7f+）
-        if (sfenMove.Length >= 4) {
-            var fromCol = sfenMove[0] - '1';
-            var fromRow = sfenMove[1] - 'a';
-            var toCol = sfenMove[2] - '1';
-            var toRow = sfenMove[3] - 'a';
-
-            if (fromCol is >= 0 and < 9 && fromRow is >= 0 and < 9 &&
-                toCol is >= 0 and < 9 && toRow is >= 0 and < 9) {
-                return ((8 - fromCol, fromRow), (8 - toCol, toRow), null);
-            }
-        }
-
-        return null;
-    }
+    public static ((int col, int row)? from, (int col, int row) to, char? dropPiece)? ParseSfenMove(string sfenMove) =>
+        UsiParser.ParseMoveCoordinates(sfenMove);
 
     public async ValueTask DisposeAsync()
     {
@@ -633,6 +447,7 @@ public class ShogiEngineService : IAsyncDisposable
             await this.StopAnalysisAsync();
         }
         this._dotNetRef?.Dispose();
+        this._evaluationUpdated.Dispose();
         GC.SuppressFinalize(this);
     }
 }

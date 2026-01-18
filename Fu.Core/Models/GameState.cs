@@ -1,14 +1,18 @@
 using System.Collections.Immutable;
 
+using Fu.Core.Abstractions;
+
 namespace Fu.Core.Models;
 
 public enum GameStatus
 {
     WaitingForConnection,
     Playing,
-    CheckmateSente,  // 先手の勝ち
-    CheckmateGote,   // 後手の勝ち
+    CheckmateFirst,  // 先手の勝ち
+    CheckmateSecond, // 後手の勝ち
     Resign,
+    TimeoutFirst,    // 先手の時間切れ（後手の勝ち）
+    TimeoutSecond,   // 後手の時間切れ（先手の勝ち）
     Reviewing        // 検討モード（手番関係なく自由に駒を動かせる）
 }
 
@@ -16,27 +20,37 @@ public static class GameStatusExtensions
 {
     /// <summary>ゲームが終了しているか</summary>
     public static bool IsGameOver(this GameStatus status) =>
-        status is GameStatus.CheckmateSente or GameStatus.CheckmateGote or GameStatus.Resign;
+        status is GameStatus.CheckmateFirst or GameStatus.CheckmateSecond or GameStatus.Resign
+               or GameStatus.TimeoutFirst or GameStatus.TimeoutSecond;
 
     /// <summary>勝者を取得（終了していない場合はnull）</summary>
-    public static Player? GetWinner(this GameStatus status) => status switch {
-        GameStatus.CheckmateSente => Player.Sente,
-        GameStatus.CheckmateGote => Player.Gote,
+    public static Turn? GetWinner(this GameStatus status) => status switch {
+        GameStatus.CheckmateFirst or GameStatus.TimeoutSecond => Turn.First,
+        GameStatus.CheckmateSecond or GameStatus.TimeoutFirst => Turn.Second,
         _ => null
     };
 
     /// <summary>勝者の勝利メッセージを取得</summary>
     public static string? GetResultMessage(this GameStatus status) => status switch {
-        GameStatus.CheckmateSente => "先手の勝ち！",
-        GameStatus.CheckmateGote => "後手の勝ち！",
+        GameStatus.CheckmateFirst => "先手の勝ち！",
+        GameStatus.CheckmateSecond => "後手の勝ち！",
+        GameStatus.TimeoutFirst => "先手時間切れ - 後手の勝ち！",
+        GameStatus.TimeoutSecond => "後手時間切れ - 先手の勝ち！",
         _ => null
     };
 
     /// <summary>プレイヤーの勝利ステータスを取得</summary>
-    public static GameStatus GetWinStatus(this Player player) => player switch {
-        Player.Sente => GameStatus.CheckmateSente,
-        Player.Gote => GameStatus.CheckmateGote,
-        _ => throw new ArgumentException("Invalid player for win status", nameof(player))
+    public static GameStatus GetWinStatus(this Turn turn) => turn switch {
+        Turn.First => GameStatus.CheckmateFirst,
+        Turn.Second => GameStatus.CheckmateSecond,
+        _ => throw new ArgumentException("Invalid turn for win status", nameof(turn))
+    };
+
+    /// <summary>プレイヤーの時間切れステータスを取得</summary>
+    public static GameStatus GetTimeoutStatus(this Turn turn) => turn switch {
+        Turn.First => GameStatus.TimeoutFirst,
+        Turn.Second => GameStatus.TimeoutSecond,
+        _ => throw new ArgumentException("Invalid turn for timeout status", nameof(turn))
     };
 }
 
@@ -75,78 +89,78 @@ public record CapturedPieces(ImmutableDictionary<PieceType, int> Pieces)
 /// </summary>
 public record GameState(
     Board Board,
-    Player CurrentPlayer,
+    Turn CurrentTurn,
     GameStatus Status,
-    CapturedPieces SenteCaptured,
-    CapturedPieces GoteCaptured,
+    CapturedPieces FirstCaptured,
+    CapturedPieces SecondCaptured,
     ImmutableList<Move> MoveHistory,
-    Player LocalPlayer,
+    Turn LocalTurn,
     int? ViewingMoveIndex = null,
     ImmutableList<Move>? ViewingBranchHistory = null,
-    ImmutableList<TimeSpan>? MoveTimes = null)
+    ImmutableList<TimeSpan>? MoveTimes = null,
+    GameTimeState? TimeState = null)
 {
-    /// <summary>棋譜ツリー（分岐対応）</summary>
-    public MoveTree MoveTree { get; init; } = new();
-
     /// <summary>各手の消費時間リスト</summary>
-    public ImmutableList<TimeSpan> Times => this.MoveTimes ?? [];
+    public IReadOnlyList<TimeSpan> Times => this.MoveTimes ?? [];
+
+    /// <summary>持ち時間管理（null = 時間制限なし）</summary>
+    public GameTimeState TimeControl => this.TimeState ?? GameTimeState.None;
+
+    /// <summary>時間制限が有効か</summary>
+    public bool HasTimeControl => this.TimeState is not null &&
+                                   this.TimeState.Settings.Type != TimeControlType.None;
 
     public static GameState Initial => new(
         new Board(),
-        Player.Sente,
+        Turn.First,
         GameStatus.WaitingForConnection,
         CapturedPieces.Empty,
         CapturedPieces.Empty,
         [],
-        Player.None
+        Turn.None
     );
 
-    public CapturedPieces GetCapturedPieces(Player player) =>
-        player == Player.Sente ? this.SenteCaptured : this.GoteCaptured;
+    public CapturedPieces GetCapturedPieces(Turn turn) =>
+        turn == Turn.First ? this.FirstCaptured : this.SecondCaptured;
 
     /// <summary>自分の手番かどうか</summary>
-    public bool IsMyTurn => this.LocalPlayer == this.CurrentPlayer;
+    public bool IsMyTurn => this.LocalTurn == this.CurrentTurn;
 
     /// <summary>別のブランチを見ているかどうか</summary>
     public bool IsViewingDifferentBranch => this.ViewingBranchHistory is not null;
 
     /// <summary>現在表示中のブランチの棋譜</summary>
-    public ImmutableList<Move> DisplayBranchHistory => this.ViewingBranchHistory ?? this.MoveHistory;
+    public IReadOnlyList<Move> DisplayBranchHistory => this.ViewingBranchHistory ?? this.MoveHistory;
+
+    /// <summary>過去の局面を見ているかどうか</summary>
+    public bool IsViewingPastPosition => this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count;
 
     /// <summary>棋譜閲覧モード中かどうか（過去の局面を見ている、または別のブランチを見ている）</summary>
-    public bool IsReviewing => this.IsViewingDifferentBranch ||
-                               (this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count);
+    public bool IsReviewing => this.IsViewingDifferentBranch || this.IsViewingPastPosition;
 
     /// <summary>対局中のブランチの最新局面を見ているかどうか</summary>
-    public bool IsAtActiveBranchLatest => !this.IsViewingDifferentBranch &&
-                                          (!this.ViewingMoveIndex.HasValue || this.ViewingMoveIndex.Value >= this.MoveHistory.Count);
+    public bool IsAtActiveBranchLatest => !this.IsReviewing;
 
     /// <summary>現在表示中の手数（0=初期配置、1=1手目後...）</summary>
     public int DisplayMoveIndex => this.ViewingMoveIndex ?? this.DisplayBranchHistory.Count;
 
-    /// <summary>現在位置に分岐があるか</summary>
-    public bool HasBranches => this.MoveTree.HasBranchesAtCurrent;
-
-    /// <summary>次の手の選択肢（分岐）</summary>
-    public IReadOnlyList<MoveNode> NextBranches => this.MoveTree.NextMoves;
-
     /// <summary>手番を交代した新しい状態を返す</summary>
-    public GameState SwitchPlayer() =>
-        this with { CurrentPlayer = this.CurrentPlayer.GetOpponent() };
+    public GameState SwitchTurn() =>
+        this with { CurrentTurn = this.CurrentTurn.GetOpponent() };
 
     /// <summary>持ち駒を更新した新しい状態を返す</summary>
-    public GameState WithCapturedPieces(Player player, CapturedPieces captured) =>
-        player == Player.Sente
-            ? this with { SenteCaptured = captured }
-            : this with { GoteCaptured = captured };
+    public GameState WithCapturedPieces(Turn turn, CapturedPieces captured) =>
+        turn == Turn.First
+            ? this with { FirstCaptured = captured }
+            : this with { SecondCaptured = captured };
 
     /// <summary>先手の累計消費時間</summary>
-    public TimeSpan SenteTotalTime => this.Times
+    public TimeSpan FirstTotalTime => this.Times
         .Where((_, i) => i % 2 == 0)  // 0, 2, 4, ... は先手
         .Aggregate(TimeSpan.Zero, (sum, t) => sum + t);
 
     /// <summary>後手の累計消費時間</summary>
-    public TimeSpan GoteTotalTime => this.Times
+    public TimeSpan SecondTotalTime => this.Times
         .Where((_, i) => i % 2 == 1)  // 1, 3, 5, ... は後手
         .Aggregate(TimeSpan.Zero, (sum, t) => sum + t);
 }

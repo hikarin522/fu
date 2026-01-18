@@ -1,41 +1,56 @@
 using System.Collections.Immutable;
 
+using Fu.Core.Collections;
+
 namespace Fu.Core.Models;
 
 /// <summary>
-/// 棋譜のノード（1手を表す）
+/// 棋譜のノード（TreeNode&lt;Move&gt;のラッパー、評価キャッシュを追加）
 /// </summary>
 public sealed class MoveNode
 {
-    public Move Move { get; }
+    private readonly TreeNode<Move> _node;
+
+    /// <summary>この手</summary>
+    public Move Move => this._node.Value;
+
+    /// <summary>親ノード</summary>
     public MoveNode? Parent { get; }
-    public ImmutableList<MoveNode> Children { get; private set; } = [];
+
+    /// <summary>子ノード</summary>
+    public IReadOnlyList<MoveNode> Children => this._children;
+    private readonly List<MoveNode> _children = [];
 
     /// <summary>このノードの深さ（手数、ルートは0）</summary>
-    public int Depth { get; }
+    public int Depth => this._node.Depth;
 
     /// <summary>このノードが属する分岐のインデックス（親から見た位置）</summary>
-    public int BranchIndex { get; }
+    public int BranchIndex => this._node.BranchIndex;
 
-    public MoveNode(Move move, MoveNode? parent, int branchIndex = 0)
+    /// <summary>この局面の評価キャッシュ</summary>
+    public CachedEvaluation? CachedEvaluation { get; set; }
+
+    /// <summary>内部のTreeNodeへの参照</summary>
+    internal TreeNode<Move> InnerNode => this._node;
+
+    internal MoveNode(TreeNode<Move> node, MoveNode? parent)
     {
-        this.Move = move;
+        this._node = node;
         this.Parent = parent;
-        this.Depth = parent is null ? 1 : parent.Depth + 1;
-        this.BranchIndex = branchIndex;
     }
 
     /// <summary>子ノードを追加</summary>
     public MoveNode AddChild(Move move)
     {
-        // 同じ手が既にあればそれを返す（PlayerとCapturedPieceは比較から除外）
-        var existing = this.Children.FirstOrDefault(c => IsSameMove(c.Move, move));
+        // 同じ手が既にあればそれを返す
+        var existing = this._children.FirstOrDefault(c => IsSameMove(c.Move, move));
         if (existing is not null) {
             return existing;
         }
 
-        var child = new MoveNode(move, this, this.Children.Count);
-        this.Children = this.Children.Add(child);
+        var childTreeNode = this._node.AddChild(move);
+        var child = new MoveNode(childTreeNode, this);
+        this._children.Add(child);
         return child;
     }
 
@@ -48,40 +63,51 @@ public sealed class MoveNode
         a.From == b.From;
 
     /// <summary>ルートからこのノードまでのパスを取得</summary>
-    public ImmutableList<MoveNode> GetPath()
+    public IReadOnlyList<MoveNode> GetPath()
     {
-        var path = ImmutableList.CreateBuilder<MoveNode>();
+        // Depth を使って配列サイズを事前確定（Insert(0,...) による O(n²) を回避）
+        var path = new MoveNode[this.Depth];
         var current = this;
-        while (current is not null) {
-            path.Insert(0, current);
+        for (var i = this.Depth - 1; i >= 0 && current is not null; i--) {
+            path[i] = current;
             current = current.Parent;
         }
-        return path.ToImmutable();
+        return path;
     }
 
     /// <summary>ルートからこのノードまでの手を取得</summary>
-    public ImmutableList<Move> GetMoves()
+    public IReadOnlyList<Move> GetMoves()
     {
-        return [.. this.GetPath().Select(n => n.Move)];
+        var moves = new Move[this.Depth];
+        var current = this;
+        for (var i = this.Depth - 1; i >= 0 && current is not null; i--) {
+            moves[i] = current.Move;
+            current = current.Parent;
+        }
+        return moves;
     }
 
     /// <summary>分岐があるかどうか</summary>
-    public bool HasBranches => this.Children.Count > 1;
+    public bool HasBranches => this._children.Count > 1;
 }
 
 /// <summary>
-/// 棋譜ツリー全体を管理
+/// 棋譜ツリー全体を管理（Tree&lt;Move&gt;のラッパー）
 /// </summary>
 public sealed class MoveTree
 {
-    /// <summary>ルートノード（仮想的な開始点、手は持たない）</summary>
+    private readonly Tree<Move> _tree = new();
+    private readonly Dictionary<TreeNode<Move>, MoveNode> _nodeMap = [];
     private readonly List<MoveNode> _rootChildren = [];
 
     /// <summary>現在位置のノード（nullは初期局面）</summary>
     public MoveNode? CurrentNode { get; private set; }
 
+    /// <summary>開始局面（CurrentNode=null）の評価キャッシュ</summary>
+    public CachedEvaluation? RootEvaluation { get; set; }
+
     /// <summary>現在の手数</summary>
-    public int CurrentDepth => this.CurrentNode?.Depth ?? 0;
+    public int CurrentDepth => this._tree.CurrentDepth;
 
     /// <summary>ルートの子ノード（1手目の選択肢）</summary>
     public IReadOnlyList<MoveNode> RootChildren => this._rootChildren;
@@ -91,27 +117,32 @@ public sealed class MoveTree
         this.CurrentNode?.Children ?? (IReadOnlyList<MoveNode>)this._rootChildren;
 
     /// <summary>現在のメインラインの手順</summary>
-    public ImmutableList<Move> CurrentLine =>
+    public IReadOnlyList<Move> CurrentLine =>
         this.CurrentNode?.GetMoves() ?? [];
 
     /// <summary>手を追加して進む</summary>
     public MoveNode AddMove(Move move)
     {
         if (this.CurrentNode is null) {
-            // ルートに追加（PlayerとCapturedPieceは比較から除外）
+            // ルートに追加
             var existing = this._rootChildren.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, move));
             if (existing is not null) {
                 this.CurrentNode = existing;
+                this._tree.GoTo(existing.InnerNode);
                 return existing;
             }
 
-            var newNode = new MoveNode(move, null, this._rootChildren.Count);
+            var treeNode = this._tree.Add(move);
+            var newNode = new MoveNode(treeNode, null);
             this._rootChildren.Add(newNode);
+            this._nodeMap[treeNode] = newNode;
             this.CurrentNode = newNode;
             return newNode;
         }
         else {
             var child = this.CurrentNode.AddChild(move);
+            this._tree.GoTo(child.InnerNode);
+            this._nodeMap.TryAdd(child.InnerNode, child);
             this.CurrentNode = child;
             return child;
         }
@@ -121,18 +152,21 @@ public sealed class MoveTree
     public MoveNode AddMoveWithoutAdvance(Move move)
     {
         if (this.CurrentNode is null) {
-            // ルートに追加（PlayerとCapturedPieceは比較から除外）
             var existing = this._rootChildren.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, move));
             if (existing is not null) {
                 return existing;
             }
 
-            var newNode = new MoveNode(move, null, this._rootChildren.Count);
+            var treeNode = this._tree.AddWithoutAdvance(move);
+            var newNode = new MoveNode(treeNode, null);
             this._rootChildren.Add(newNode);
+            this._nodeMap[treeNode] = newNode;
             return newNode;
         }
         else {
-            return this.CurrentNode.AddChild(move);
+            var child = this.CurrentNode.AddChild(move);
+            this._nodeMap.TryAdd(child.InnerNode, child);
+            return child;
         }
     }
 
@@ -143,6 +177,7 @@ public sealed class MoveTree
             return false;
         }
         this.CurrentNode = this.CurrentNode.Parent;
+        this._tree.GoBack();
         return true;
     }
 
@@ -154,6 +189,7 @@ public sealed class MoveTree
             return false;
         }
         this.CurrentNode = next[0];
+        this._tree.GoForward();
         return true;
     }
 
@@ -165,6 +201,7 @@ public sealed class MoveTree
             return false;
         }
         this.CurrentNode = next[branchIndex];
+        this._tree.GoForwardBranch(branchIndex);
         return true;
     }
 
@@ -172,12 +209,14 @@ public sealed class MoveTree
     public void GoTo(MoveNode? node)
     {
         this.CurrentNode = node;
+        this._tree.GoTo(node?.InnerNode);
     }
 
     /// <summary>初期局面に戻る</summary>
     public void GoToStart()
     {
         this.CurrentNode = null;
+        this._tree.GoToStart();
     }
 
     /// <summary>メインラインの最後まで進む</summary>
@@ -189,53 +228,29 @@ public sealed class MoveTree
     /// <summary>ツリーをクリア</summary>
     public void Clear()
     {
+        this._tree.Clear();
         this._rootChildren.Clear();
+        this._nodeMap.Clear();
         this.CurrentNode = null;
+        this.RootEvaluation = null;
     }
 
     /// <summary>現在位置に分岐があるか</summary>
     public bool HasBranchesAtCurrent => this.NextMoves.Count > 1;
 
     /// <summary>ツリー内の分岐点の総数（子が2つ以上あるノードの数）</summary>
-    public int TotalBranchCount
-    {
-        get
-        {
-            var count = 0;
-            // ルートに複数の子があれば分岐
-            if (this._rootChildren.Count > 1) {
-                count++;
-            }
-            // 全ノードを走査して分岐点をカウント
-            count += CountBranchesRecursive(this._rootChildren);
-            return count;
-        }
-    }
-
-    private static int CountBranchesRecursive(IReadOnlyList<MoveNode> nodes)
-    {
-        var count = 0;
-        foreach (var node in nodes) {
-            if (node.Children.Count > 1) {
-                count++;
-            }
-            count += CountBranchesRecursive(node.Children);
-        }
-        return count;
-    }
+    public int TotalBranchCount => this._tree.TotalBranchCount;
 
     /// <summary>全ての手（現在のラインのフラット表示用）</summary>
-    public ImmutableList<Move> GetFlatMoves()
+    public IReadOnlyList<Move> GetFlatMoves()
     {
-        var moves = ImmutableList.CreateBuilder<Move>();
+        var moves = new List<Move>();
         var node = this.CurrentNode;
 
-        // 現在位置までの手を取得
         if (node is not null) {
             moves.AddRange(node.GetMoves());
         }
 
-        // 現在位置から先のメインラインを追加
         var current = node;
         while (true) {
             var children = current?.Children ?? (IReadOnlyList<MoveNode>)this._rootChildren;
@@ -244,7 +259,7 @@ public sealed class MoveTree
             }
 
             if (current is null && moves.Count > 0) {
-                break; // 既にルートから取得済み
+                break;
             }
 
             var next = children[0];
@@ -254,25 +269,23 @@ public sealed class MoveTree
             current = next;
         }
 
-        return moves.ToImmutable();
+        return moves;
     }
 
     /// <summary>全てのブランチ（各ラインの終端ノード）を取得</summary>
-    public ImmutableList<MoveNode> GetAllBranchEndNodes()
+    public IReadOnlyList<MoveNode> GetAllBranchEndNodes()
     {
-        var endNodes = ImmutableList.CreateBuilder<MoveNode>();
+        var endNodes = new List<MoveNode>();
         CollectEndNodes(this._rootChildren, endNodes);
-        return endNodes.ToImmutable();
+        return endNodes;
     }
 
-    private static void CollectEndNodes(IReadOnlyList<MoveNode> nodes, ImmutableList<MoveNode>.Builder endNodes)
+    private static void CollectEndNodes(IReadOnlyList<MoveNode> nodes, List<MoveNode> endNodes)
     {
         foreach (var node in nodes) {
             if (node.Children.Count == 0) {
-                // 終端ノード
                 endNodes.Add(node);
             } else {
-                // 子ノードを再帰的に探索
                 CollectEndNodes(node.Children, endNodes);
             }
         }
@@ -286,14 +299,12 @@ public sealed class MoveTree
         }
 
         var allEndNodes = this.GetAllBranchEndNodes();
-        // ノードのパスを取得
         var nodePath = node.GetPath();
 
         for (var i = 0; i < allEndNodes.Count; i++) {
             var endNode = allEndNodes[i];
             var endPath = endNode.GetPath();
 
-            // 現在のノードがこのブランチのパス上にあるかチェック
             if (nodePath.Count <= endPath.Count) {
                 var match = true;
                 for (var j = 0; j < nodePath.Count; j++) {
