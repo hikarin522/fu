@@ -1230,9 +1230,16 @@ a, .btn-link {
     padding: 16px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    max-width: 200px;
-    max-height: 400px;
-    overflow-y: auto;
+    width: 350px;
+    height: 400px;
+    min-width: 200px;
+    min-height: 150px;
+    max-width: 80vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    resize: both;
 }
 
 .move-history-header {
@@ -1265,6 +1272,9 @@ a, .btn-link {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
 }
 
 .move-entry {
