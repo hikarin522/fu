@@ -579,7 +579,11 @@ public partial class Index : IAsyncDisposable
     /// <summary>プレイヤーの累計時間を取得（現在の手番の経過時間を含む）</summary>
     private TimeSpan GetPlayerTime(Turn player)
     {
-        var state = this.RequireGameService.State;
+        if (this.GameService is not { } gs) {
+            return TimeSpan.Zero;
+        }
+
+        var state = gs.State;
         var totalTime = player == Turn.First
             ? state.FirstTotalTime
             : state.SecondTotalTime;

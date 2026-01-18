@@ -14,7 +14,7 @@ public static class JSInteropHelper
         params object?[]? args)
     {
         try {
-            return await js.InvokeAsync<T>(identifier, args);
+            return await js.InvokeAsync<T>(identifier, args ?? []);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
@@ -34,7 +34,7 @@ public static class JSInteropHelper
         params object?[]? args)
     {
         try {
-            return await js.InvokeAsync<T>(identifier, args);
+            return await js.InvokeAsync<T>(identifier, args ?? []);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
@@ -52,7 +52,7 @@ public static class JSInteropHelper
         params object?[]? args)
     {
         try {
-            await js.InvokeVoidAsync(identifier, args);
+            await js.InvokeVoidAsync(identifier, args ?? []);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
@@ -69,7 +69,7 @@ public static class JSInteropHelper
         params object?[]? args)
     {
         try {
-            return await js.InvokeAsync<T>(identifier, args);
+            return await js.InvokeAsync<T>(identifier, args ?? []);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
@@ -84,7 +84,7 @@ public static class JSInteropHelper
         params object?[]? args)
     {
         try {
-            await js.InvokeVoidAsync(identifier, args);
+            await js.InvokeVoidAsync(identifier, args ?? []);
         }
         catch (JSException ex) {
             LogError(identifier, ex);
