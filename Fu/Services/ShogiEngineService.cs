@@ -97,32 +97,38 @@ public class ShogiEngineService : IAsyncDisposable
 
             this._dotNetRef = DotNetObjectReference.Create(this);
 
-            // 初期化時にコールバックも渡す
-            var success = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init", this._dotNetRef);
-            this._initialized = true;
-            this.IsAvailable = success;
-
-            if (success) {
-                // エンジンの設定とreadyok待機
-                this._readyTcs = new TaskCompletionSource();
-                await this.SendCommandAsync("usi");
-                await this.SendCommandAsync("isready");
-
-                // readyokを最大5秒待機
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                try {
-                    await this._readyTcs.Task.WaitAsync(cts.Token);
-                    this._isReady = true;
-                    Console.WriteLine("Engine is ready");
-                }
-                catch (OperationCanceledException) {
-                    Console.WriteLine("Engine readyok timeout");
-                    this.IsAvailable = false;
-                    return false;
-                }
+            // エンジン初期化（JSで usi コマンドも送信される）
+            var success = await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init");
+            if (!success) {
+                this._initialized = true;
+                this.IsAvailable = false;
+                return false;
             }
 
-            return success;
+            // コールバック設定
+            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
+
+            this._initialized = true;
+            this.IsAvailable = true;
+
+            // readyok待機
+            this._readyTcs = new TaskCompletionSource();
+            await this.SendCommandAsync("isready");
+
+            // readyokを最大5秒待機
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try {
+                await this._readyTcs.Task.WaitAsync(cts.Token);
+                this._isReady = true;
+                Console.WriteLine("Engine is ready");
+            }
+            catch (OperationCanceledException) {
+                Console.WriteLine("Engine readyok timeout");
+                this.IsAvailable = false;
+                return false;
+            }
+
+            return true;
         }
         catch (Exception ex) {
             Console.WriteLine($"Failed to initialize engine: {ex.Message}");
@@ -134,7 +140,7 @@ public class ShogiEngineService : IAsyncDisposable
 
     /// <summary>エンジンにコマンドを送信</summary>
     private async Task<bool> SendCommandAsync(string command) =>
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.postMessage", command);
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", command);
 
     /// <summary>局面を分析（MoveTreeベース）</summary>
     /// <param name="depth">探索深さ（0 = 無限探索）</param>
@@ -195,10 +201,8 @@ public class ShogiEngineService : IAsyncDisposable
         // SFEN生成してエンジンに送信
         var sfen = this._sfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
 
-        // 探索停止→局面設定→探索開始
-        await this.SendCommandAsync("stop");
-        await this.SendCommandAsync($"position sfen {sfen}");
-        await this.SendCommandAsync(depth > 0 ? $"go depth {depth}" : "go infinite");
+        // JS側でstop→position→goを一括実行（メインスレッドブロッキング回避）
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
     }
 
     /// <summary>ノードからキャッシュを取得</summary>
@@ -257,7 +261,7 @@ public class ShogiEngineService : IAsyncDisposable
         }
 
         this._isAnalyzing = false;
-        await this.SendCommandAsync("stop");
+        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
     }
 
     /// <summary>エンジンからのメッセージを処理</summary>
