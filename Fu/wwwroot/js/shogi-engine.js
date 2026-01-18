@@ -28,6 +28,7 @@ window.ShogiEngine = {
 
             // メッセージリスナーを設定（C#にコールバック）
             engine.addMessageListener((line) => {
+                console.log('Engine:', line);
                 dotNetRef.invokeMethodAsync('OnEngineMessage', line);
             });
 
