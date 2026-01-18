@@ -168,29 +168,20 @@ public class ShogiEngineService : IDisposable
     }
 
     /// <summary>分析を停止</summary>
-    public async Task StopAnalysisAsync()
+    public Task StopAnalysisAsync()
     {
         var cts = this._analysisCts;
-        var task = this._analysisTask;
-
         this._analysisCts = null;
         this._analysisTask = null;
 
         if (cts is not null) {
-            await cts.CancelAsync();
+            cts.Cancel();
             cts.Dispose();
         }
 
-        // 分析タスクの完了を待機（タイムアウト付き）
-        if (task is not null) {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-            try {
-                await task.WaitAsync(timeoutCts.Token);
-            }
-            catch (OperationCanceledException) {
-                // タイムアウト - バックグラウンドで完了するのを待たない
-            }
-        }
+        // 分析タスクの完了は待機しない（デッドロック防止）
+        // 次のGoAsync呼び出し時にYaneuraOuEngine側でクリーンアップされる
+        return Task.CompletedTask;
     }
 
     private void ResetEvaluation()
