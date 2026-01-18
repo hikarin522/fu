@@ -34,12 +34,24 @@ async function initShogiEngine() {
             }
         });
 
-        // Initialize USI
-        yaneuraou.postMessage('usi');
-
-        engineReady = true;
+        // エンジンを先に設定
         engine = yaneuraou;
+        engineReady = true;
         console.log('YaneuraOu engine initialized');
+
+        // USI初期化とusiok待機
+        await new Promise((resolve) => {
+            let resolved = false;
+            yaneuraou.addMessageListener((line) => {
+                if (!resolved && line === 'usiok') {
+                    resolved = true;
+                    resolve();
+                }
+            });
+            yaneuraou.postMessage('usi');
+        });
+
+        console.log('USI handshake complete');
         return true;
     } catch (error) {
         console.error('Failed to initialize shogi engine:', error);
