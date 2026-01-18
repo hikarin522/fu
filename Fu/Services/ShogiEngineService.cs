@@ -20,6 +20,8 @@ public class ShogiEngineService : IAsyncDisposable
     private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
     private bool _initialized;
     private bool _isAnalyzing;
+    private bool _isReady; // readyok受信後にtrue
+    private TaskCompletionSource? _readyTcs; // readyok待機用
     private readonly Dictionary<int, CandidateMove> _candidates = [];
     private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
     private int _newDepthCandidateCount;
@@ -101,9 +103,23 @@ public class ShogiEngineService : IAsyncDisposable
             this.IsAvailable = success;
 
             if (success) {
-                // エンジンの設定
+                // エンジンの設定とreadyok待機
+                this._readyTcs = new TaskCompletionSource();
                 await this.SendCommandAsync("usi");
                 await this.SendCommandAsync("isready");
+
+                // readyokを最大5秒待機
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try {
+                    await this._readyTcs.Task.WaitAsync(cts.Token);
+                    this._isReady = true;
+                    Console.WriteLine("Engine is ready");
+                }
+                catch (OperationCanceledException) {
+                    Console.WriteLine("Engine readyok timeout");
+                    this.IsAvailable = false;
+                    return false;
+                }
             }
 
             return success;
@@ -131,7 +147,7 @@ public class ShogiEngineService : IAsyncDisposable
         int depth = 0,
         int multiPv = 1)
     {
-        if (!this.IsAvailable) {
+        if (!this.IsAvailable || !this._isReady) {
             return;
         }
 
@@ -248,10 +264,23 @@ public class ShogiEngineService : IAsyncDisposable
     [JSInvokable]
     public Task OnEngineMessage(string message)
     {
+        // readyokを受信したら初期化完了
+        if (message == "readyok") {
+            this._readyTcs?.TrySetResult();
+            return Task.CompletedTask;
+        }
+
+        // 準備完了前のメッセージは無視（usiok等）
+        if (!this._isReady) {
+            return Task.CompletedTask;
+        }
+
         // USIプロトコルのメッセージをパース
         if (message.StartsWith("info ", StringComparison.Ordinal)) {
-            this.ParseInfoMessage(message);
-            this._evaluationUpdated.OnNext(Unit.Default);
+            // ParseInfoMessageは意味のある変更があった場合のみtrueを返す
+            if (this.ParseInfoMessage(message)) {
+                this._evaluationUpdated.OnNext(Unit.Default);
+            }
         }
         else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
             var parts = message.Split(' ');
@@ -269,7 +298,11 @@ public class ShogiEngineService : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private void ParseInfoMessage(string message)
+    /// <summary>
+    /// infoメッセージをパースして状態を更新
+    /// </summary>
+    /// <returns>UIを更新すべき意味のある変更があった場合はtrue</returns>
+    private bool ParseInfoMessage(string message)
     {
         var parts = message.Split(' ');
         var info = ParseUsiInfo(parts);
@@ -282,7 +315,7 @@ public class ShogiEngineService : IAsyncDisposable
         if (!isCurrentPosition) {
             // 現在の局面ではない場合、最後に分析したノードのキャッシュを更新（UI更新はしない）
             this.UpdateCacheOnly(info);
-            return;
+            return false;
         }
 
         // 深さがない、または現在より深い場合のみメイン評価値を更新
@@ -293,7 +326,7 @@ public class ShogiEngineService : IAsyncDisposable
         // 既に詰みが検出されている場合、cp スコアでは上書きしない
         // （詰み検出後の別分析結果で詰みが消えることを防ぐ）
         if (this.MateIn.HasValue && !info.MateIn.HasValue) {
-            return;
+            return false;
         }
 
         // 評価値を先手視点に変換
@@ -355,6 +388,9 @@ public class ShogiEngineService : IAsyncDisposable
             );
             this._newDepthCandidateCount = this._candidates.Count;
         }
+
+        // 深さが増加した場合、または詰みを検出した場合のみUIを更新
+        return isNewDepth || hasMate;
     }
 
     /// <summary>過去の局面の解析結果をキャッシュに反映（UI更新なし）</summary>
