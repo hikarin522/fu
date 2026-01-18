@@ -191,7 +191,9 @@ public class BranchService : IBranchService
                 : nodeToAddFrom.AddChild(move);
         }
 
-        this._events.NotifyStateChanged();
+        // NotifyStateChangedは呼ばない（呼び出し元でStateHasChangedを呼ぶため、
+        // ここで呼ぶとOnGameStateChangedAsync→RequestEvaluationAsync→OnEvaluationUpdatedAsync
+        // →AddMateSequenceBranchAsync→NotifyStateChanged の無限ループになる）
         return Task.FromResult(true);
     }
 
