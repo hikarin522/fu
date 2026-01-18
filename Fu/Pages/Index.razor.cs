@@ -64,7 +64,7 @@ public partial class Index : IAsyncDisposable
         this.GameService ?? throw new InvalidOperationException("Game service is not available");
 
     /// <summary>現在のゲーム状態（対局中でない場合はデフォルト状態を返す）</summary>
-    private GameState CurrentGameState => this.GameService?.State ?? GameState.Default;
+    private IReadOnlyGameState CurrentGameState => this.GameService?.State ?? GameState.Initial;
 
     // 観戦者・検討中用の盤面反転状態
     private bool SpectatorFlipped { get; set; }

@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 using Fu.Core.Abstractions;
 using Fu.Core.Models;
 
@@ -12,8 +10,7 @@ namespace Fu.Core.Services;
 public class ShogiGameService : IGameLifecycleService, IGameNavigationService, IBranchService, IDisposable
 {
     private readonly IShogiRules _rules;
-    private readonly ShogiGameState _state;
-    private readonly IGameEventPublisher _events;
+    private readonly GameStore _store;
     private readonly ITurnTimerService _timer;
     private readonly IBoardCache _boardCache;
 
@@ -24,8 +21,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
     public ShogiGameService(
         IShogiRules rules,
         IUsiParser usiParser,
-        ShogiGameState state,
-        IGameEventPublisher events,
+        GameStore store,
         ITurnTimerService timer,
         IBoardCache boardCache,
         IGameLifecycleService lifecycle,
@@ -33,8 +29,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         IBranchService branch)
     {
         this._rules = rules;
-        this._state = state;
-        this._events = events;
+        this._store = store;
         this._timer = timer;
         this._boardCache = boardCache;
         this._lifecycle = lifecycle;
@@ -42,24 +37,17 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         this._branch = branch;
     }
 
-    public GameState State
-    {
-        get => this._state.State;
-        private set => this._state.State = value;
-    }
+    /// <summary>現在の状態（UI用・読み取り専用）</summary>
+    public IReadOnlyGameState State => this._store.State;
+
+    /// <summary>現在の状態（内部用・mutable）</summary>
+    private GameState MutableState => this._store.MutableState;
 
     /// <summary>棋譜ツリー（分岐対応）</summary>
-    public MoveTree MoveTree
-    {
-        get => this._state.MoveTree;
-        private set => this._state.MoveTree = value;
-    }
+    public MoveTree MoveTree => this._store.MoveTree;
 
     /// <summary>最後に記録された手の消費時間（送信用）</summary>
-    public TimeSpan LastMoveElapsedTime => this._state.LastMoveElapsedTime;
-
-    private void NotifyStateChanged() => this._events.NotifyStateChanged();
-    private void NotifyReviewMove(Move move) => this._events.NotifyReviewMove(move);
+    public TimeSpan LastMoveElapsedTime => this._store.LastMoveElapsedTime;
 
     #region IGameLifecycleService 委譲
 
@@ -131,12 +119,12 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
     private TimeSpan StopTurnTimer()
     {
         var elapsed = this._timer.StopAndGetElapsed();
-        this._state.LastMoveElapsedTime = elapsed;
+        this._store.LastMoveElapsedTime = elapsed;
 
         // 時間制御が有効な場合、時間状態を更新
         if (this.State.TimeState is { } timeState) {
             var newTimeState = timeState.ConsumeTime(this.State.CurrentTurn, elapsed);
-            this.State.TimeState = newTimeState;
+            this._store.Update(state => state.TimeState = newTimeState);
         }
 
         return elapsed;
@@ -155,8 +143,9 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         }
 
         this._timer.StopOnly();
-        this.State.Status = expiredPlayer.Value.GetTimeoutStatus();
-        this.NotifyStateChanged();
+        this._store.Update(state => {
+            state.Status = expiredPlayer.Value.GetTimeoutStatus();
+        });
         return true;
     }
 
@@ -189,25 +178,25 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
     #region 合法手取得（ShogiRulesへ委譲）
 
     public List<Position> GetLegalMoves(Position from) =>
-        this._rules.GetLegalMoves(this.State.Board, from, this.State.CurrentTurn);
+        this._rules.GetLegalMoves(this.MutableState.Board, from, this.MutableState.CurrentTurn);
 
     public List<Position> GetLegalDropPositions(PieceType pieceType) =>
-        this._rules.GetLegalDropPositions(this.State.Board, this.State.CurrentTurn, this.State.GetCapturedPieces(this.State.CurrentTurn), pieceType);
+        this._rules.GetLegalDropPositions(this.MutableState.Board, this.MutableState.CurrentTurn, this.MutableState.GetCapturedPieces(this.MutableState.CurrentTurn), pieceType);
 
     public List<Position> GetLegalMovesForTurn(Position from, Turn turn) =>
-        this._rules.GetLegalMoves(this.State.Board, from, turn);
+        this._rules.GetLegalMoves(this.MutableState.Board, from, turn);
 
     public List<Position> GetLegalDropPositionsForTurn(PieceType pieceType, Turn turn) =>
-        this._rules.GetLegalDropPositions(this.State.Board, turn, this.State.GetCapturedPieces(turn), pieceType);
+        this._rules.GetLegalDropPositions(this.MutableState.Board, turn, this.MutableState.GetCapturedPieces(turn), pieceType);
 
     public bool CanPromote(Position from, Position to) =>
-        this._rules.CanPromote(this.State.Board, from, to);
+        this._rules.CanPromote(this.MutableState.Board, from, to);
 
     public bool MustPromote(Position from, Position to) =>
-        this._rules.MustPromote(this.State.Board, from, to);
+        this._rules.MustPromote(this.MutableState.Board, from, to);
 
     public bool IsInCheck() =>
-        this._rules.IsInCheck(this.State.Board, this.State.CurrentTurn);
+        this._rules.IsInCheck(this.MutableState.Board, this.MutableState.CurrentTurn);
 
     #endregion
 
@@ -215,15 +204,15 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
     public async Task<bool> TryMakeMoveAsync(Move move)
     {
-        if (this.State.Status == GameStatus.Reviewing) {
+        if (this.MutableState.Status == GameStatus.Reviewing) {
             return await this.TryMakeReviewMoveAsync(move);
         }
 
-        if (this.State.Status != GameStatus.Playing) {
+        if (this.MutableState.Status != GameStatus.Playing) {
             return false;
         }
 
-        if (this.State.IsReviewing) {
+        if (this.MutableState.IsReviewing) {
             return false;
         }
 
@@ -239,9 +228,9 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
         var from = move.From.Value;
         var to = move.To;
-        var piece = this.State.Board[from];
+        var piece = this.MutableState.Board[from];
 
-        if (piece is null || piece.Owner != this.State.CurrentTurn) {
+        if (piece is null || piece.Owner != this.MutableState.CurrentTurn) {
             return false;
         }
 
@@ -250,23 +239,26 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
             return false;
         }
 
-        var captured = this.State.Board[to];
-        var newCaptured = this.State.GetCapturedPieces(this.State.CurrentTurn);
+        var captured = this.MutableState.Board[to];
+        var myCaptured = this.MutableState.GetCapturedPieces(this.MutableState.CurrentTurn);
         var moveToRecord = move;
 
         if (captured is not null) {
-            newCaptured.Add(captured.Type);
+            myCaptured.Add(captured.Type);
             moveToRecord = move.WithCapturedPiece(captured.Type);
 
             if (captured.Type == PieceType.King) {
                 var kingCaptureTime = this.StopTurnTimer();
                 this.MoveTree.AddMove(moveToRecord);
-                this.State.Board = this.State.Board.MovePiece(from, to);
-                this.State.MoveHistory.Add(moveToRecord);
-                (this.State.MoveTimes ??= []).Add(kingCaptureTime);
-                this.State.Status = this.State.CurrentTurn.GetWinStatus();
-                this.State.SetCapturedPieces(this.State.CurrentTurn, newCaptured);
-                this.NotifyStateChanged();
+
+                var currentTurn = this.MutableState.CurrentTurn;
+                this._store.Update(state => {
+                    state.Board = state.Board.MovePiece(from, to);
+                    state.MoveHistory.Add(moveToRecord);
+                    state.MoveTimes ??= [];
+                    state.MoveTimes.Add(kingCaptureTime);
+                    state.Status = currentTurn.GetWinStatus();
+                });
                 return true;
             }
         }
@@ -278,21 +270,23 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
         this.MoveTree.AddMove(moveToRecord);
 
-        this.State.Board = this.State.Board.MovePiece(from, to, newPiece);
-        this.State.MoveHistory.Add(moveToRecord);
-        (this.State.MoveTimes ??= []).Add(moveTime);
-        this.State.ViewingMoveIndex = null;
-        this.State.SetCapturedPieces(this.State.CurrentTurn, newCaptured);
-        this.State.SwitchTurn();
+        var turn = this.MutableState.CurrentTurn;
+        this._store.Update(state => {
+            state.Board = state.Board.MovePiece(from, to, newPiece);
+            state.MoveHistory.Add(moveToRecord);
+            state.MoveTimes ??= [];
+            state.MoveTimes.Add(moveTime);
+            state.ViewingMoveIndex = null;
+            state.CurrentTurn = turn.GetOpponent();
+        });
 
         await this.CheckForCheckmateAsync();
-        this.NotifyStateChanged();
         return true;
     }
 
     private async Task<bool> TryDropPieceAsync(Move move)
     {
-        var captured = this.State.GetCapturedPieces(this.State.CurrentTurn);
+        var captured = this.MutableState.GetCapturedPieces(this.MutableState.CurrentTurn);
         if (captured.GetCount(move.PieceType) <= 0) {
             return false;
         }
@@ -303,7 +297,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         }
 
         var moveTime = this.StopTurnTimer();
-        var moveWithTurn = move.WithTurn(this.State.CurrentTurn);
+        var moveWithTurn = move.WithTurn(this.MutableState.CurrentTurn);
         var recordedMove = this.ApplyDropCore(moveWithTurn, moveTime);
         if (recordedMove is null) {
             return false;
@@ -312,24 +306,24 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         this.MoveTree.AddMove(recordedMove);
 
         await this.CheckForCheckmateAsync();
-        this.NotifyStateChanged();
         return true;
     }
 
     private async Task CheckForCheckmateAsync()
     {
-        var currentTurn = this.State.CurrentTurn;
-        var captured = this.State.GetCapturedPieces(currentTurn);
+        var currentTurn = this.MutableState.CurrentTurn;
+        var captured = this.MutableState.GetCapturedPieces(currentTurn);
 
-        if (this._rules.IsCheckmate(this.State.Board, currentTurn, captured)) {
-            this.State.Status = currentTurn.GetOpponent().GetWinStatus();
-            this.NotifyStateChanged();
+        if (this._rules.IsCheckmate(this.MutableState.Board, currentTurn, captured)) {
+            this._store.Update(state => {
+                state.Status = currentTurn.GetOpponent().GetWinStatus();
+            });
         }
     }
 
     /// <summary>リモートから受信した手を適用（消費時間も適用）</summary>
     public Task ApplyRemoteMoveAsync(Move move, TimeSpan elapsedTime) =>
-        this.TryMakeMoveWithTimeAsync(move.WithTurn(this.State.CurrentTurn), elapsedTime);
+        this.TryMakeMoveWithTimeAsync(move.WithTurn(this.MutableState.CurrentTurn), elapsedTime);
 
     private async Task<bool> TryMakeMoveWithTimeAsync(Move move, TimeSpan elapsedTime)
     {
@@ -349,7 +343,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
     private async Task<bool> TryMakeReviewMoveAsync(Move move)
     {
-        if (this.State.IsReviewing) {
+        if (this.MutableState.IsReviewing) {
             await this.BranchFromCurrentPositionAsync(notifyBranchResumed: false);
         }
 
@@ -365,7 +359,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
         var from = move.From.Value;
         var to = move.To;
-        var piece = this.State.Board[from];
+        var piece = this.MutableState.Board[from];
 
         if (piece is null) {
             return false;
@@ -381,15 +375,14 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         var recordedMove = this.ApplyMoveCore(moveWithTurn);
         this.MoveTree.AddMove(recordedMove);
 
-        this.NotifyReviewMove(recordedMove);
-        this.NotifyStateChanged();
+        this._store.NotifyReviewMove(recordedMove);
         return true;
     }
 
     private async Task<bool> TryDropPieceForReviewAsync(Move move)
     {
-        var turn = this.State.CurrentTurn;
-        var captured = this.State.GetCapturedPieces(turn);
+        var turn = this.MutableState.CurrentTurn;
+        var captured = this.MutableState.GetCapturedPieces(turn);
         if (captured.GetCount(move.PieceType) <= 0) {
             return false;
         }
@@ -407,8 +400,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
         this.MoveTree.AddMove(recordedMove);
 
-        this.NotifyReviewMove(recordedMove);
-        this.NotifyStateChanged();
+        this._store.NotifyReviewMove(recordedMove);
         return true;
     }
 
@@ -422,16 +414,18 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
             this.MoveTree.AddMove(move);
         }
 
-        this.State.Board = board;
-        this.State.FirstCaptured = firstCaptured;
-        this.State.SecondCaptured = secondCaptured;
-        this.State.CurrentTurn = currentTurn;
-        this.State.MoveHistory = [.. newHistory];
-        this.State.ViewingMoveIndex = null;
-        this.State.ViewingBranchHistory = null;
+        this._store.Update(state => {
+            state.Board = board;
+            state.FirstCaptured = firstCaptured;
+            state.SecondCaptured = secondCaptured;
+            state.CurrentTurn = currentTurn;
+            state.MoveHistory = [.. newHistory];
+            state.ViewingMoveIndex = null;
+            state.ViewingBranchHistory = null;
+        });
 
         if (notifyBranchResumed) {
-            this._events.NotifyBranchResumed(newHistory);
+            this._store.NotifyBranchResumed(newHistory);
         }
     }
 
@@ -445,13 +439,13 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         var from = move.From!.Value;
         var to = move.To;
         var turn = move.Turn;
-        var piece = this.State.Board[from]!;
-        var captured = this.State.Board[to];
-        var newCaptured = this.State.GetCapturedPieces(turn);
+        var piece = this.MutableState.Board[from]!;
+        var captured = this.MutableState.Board[to];
+        var myCaptured = this.MutableState.GetCapturedPieces(turn);
         var recordedMove = move;
 
         if (captured is not null) {
-            newCaptured.Add(captured.Type);
+            myCaptured.Add(captured.Type);
             recordedMove = recordedMove.WithCapturedPiece(captured.Type);
         }
 
@@ -459,14 +453,16 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
             ? piece with { Type = piece.Type.GetPromotedType() }
             : piece;
 
-        this.State.Board = this.State.Board.MovePiece(from, to, newPiece);
-        this.State.MoveHistory.Add(recordedMove);
-        if (moveTime.HasValue) {
-            (this.State.MoveTimes ??= []).Add(moveTime.Value);
-        }
-        this.State.CurrentTurn = turn.GetOpponent();
-        this.State.ViewingMoveIndex = null;
-        this.State.SetCapturedPieces(turn, newCaptured);
+        this._store.Update(state => {
+            state.Board = state.Board.MovePiece(from, to, newPiece);
+            state.MoveHistory.Add(recordedMove);
+            if (moveTime.HasValue) {
+                state.MoveTimes ??= [];
+                state.MoveTimes.Add(moveTime.Value);
+            }
+            state.CurrentTurn = turn.GetOpponent();
+            state.ViewingMoveIndex = null;
+        });
 
         return recordedMove;
     }
@@ -475,21 +471,23 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
     private Move? ApplyDropCore(Move move, TimeSpan? moveTime = null)
     {
         var turn = move.Turn;
-        var captured = this.State.GetCapturedPieces(turn);
-        if (!captured.TryRemove(move.PieceType)) {
+        var myCaptured = this.MutableState.GetCapturedPieces(turn);
+        if (!myCaptured.TryRemove(move.PieceType)) {
             return null;
         }
 
         var recordedMove = move.WithTurn(turn);
 
-        this.State.Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, turn));
-        this.State.MoveHistory.Add(recordedMove);
-        if (moveTime.HasValue) {
-            (this.State.MoveTimes ??= []).Add(moveTime.Value);
-        }
-        this.State.CurrentTurn = turn.GetOpponent();
-        this.State.ViewingMoveIndex = null;
-        this.State.SetCapturedPieces(turn, captured);
+        this._store.Update(state => {
+            state.Board = state.Board.SetPiece(move.To, new Piece(move.PieceType, turn));
+            state.MoveHistory.Add(recordedMove);
+            if (moveTime.HasValue) {
+                state.MoveTimes ??= [];
+                state.MoveTimes.Add(moveTime.Value);
+            }
+            state.CurrentTurn = turn.GetOpponent();
+            state.ViewingMoveIndex = null;
+        });
 
         return recordedMove;
     }
@@ -500,14 +498,14 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
     private IReadOnlyList<Move> GetCurrentDisplayHistory()
     {
-        var displayHistory = this.State.DisplayBranchHistory;
-        var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
+        var displayHistory = this.MutableState.DisplayBranchHistory;
+        var viewingIndex = this.MutableState.ViewingMoveIndex ?? displayHistory.Count;
         return [.. displayHistory.Take(viewingIndex)];
     }
 
     private void SyncMoveTreeToCurrentPosition()
     {
-        this.SyncMoveTreeToPosition(this.State.MoveHistory.Count);
+        this.SyncMoveTreeToPosition(this.MutableState.MoveHistory.Count);
     }
 
     private void SyncMoveTreeToPosition(int targetIndex)
@@ -516,7 +514,7 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
 
         if (currentDepth == targetIndex) {
             var currentMoves = this.MoveTree.CurrentLine;
-            var historySlice = this.State.MoveHistory.Take(targetIndex).ToList();
+            var historySlice = this.MutableState.MoveHistory.Take(targetIndex).ToList();
             if (currentMoves.Count == historySlice.Count &&
                 currentMoves.Select((m, i) => m == historySlice[i]).All(x => x)) {
                 return;
@@ -524,8 +522,8 @@ public class ShogiGameService : IGameLifecycleService, IGameNavigationService, I
         }
 
         this.MoveTree.GoToStart();
-        for (var i = 0; i < targetIndex && i < this.State.MoveHistory.Count; i++) {
-            this.MoveTree.AddMove(this.State.MoveHistory[i]);
+        for (var i = 0; i < targetIndex && i < this.MutableState.MoveHistory.Count; i++) {
+            this.MoveTree.AddMove(this.MutableState.MoveHistory[i]);
         }
     }
 

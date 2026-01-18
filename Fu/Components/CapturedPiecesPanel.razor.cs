@@ -7,7 +7,7 @@ namespace Fu.Components;
 
 public partial class CapturedPiecesPanel
 {
-    [Parameter] public CapturedPieces Pieces { get; set; } = CapturedPieces.Empty;
+    [Parameter] public IReadOnlyCapturedPieces Pieces { get; set; } = CapturedPieces.Empty;
     [Parameter] public Turn Player { get; set; }
     [Parameter] public bool IsOpponent { get; set; }
     [Parameter] public EventCallback<PieceType> OnPieceSelected { get; set; }

@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 using Fu.Core.Abstractions;
 using Fu.Core.Models;
 
@@ -12,21 +10,18 @@ namespace Fu.Core.Services;
 public class GameLifecycleService : IGameLifecycleService
 {
     private readonly IShogiRules _rules;
-    private readonly ShogiGameState _state;
-    private readonly IGameEventPublisher _events;
+    private readonly GameStore _store;
     private readonly ITurnTimerService _timer;
     private readonly IBoardCache _boardCache;
 
     public GameLifecycleService(
         IShogiRules rules,
-        ShogiGameState state,
-        IGameEventPublisher events,
+        GameStore store,
         ITurnTimerService timer,
         IBoardCache boardCache)
     {
         this._rules = rules;
-        this._state = state;
-        this._events = events;
+        this._store = store;
         this._timer = timer;
         this._boardCache = boardCache;
     }
@@ -36,7 +31,7 @@ public class GameLifecycleService : IGameLifecycleService
 
     public Task NewGameAsync(TimeControlSettings timeSettings)
     {
-        var localTurn = this._state.State.LocalTurn;
+        var localTurn = this._store.State.LocalTurn;
 
         // タイマーを初期化
         this._timer.Initialize(timeSettings);
@@ -47,61 +42,62 @@ public class GameLifecycleService : IGameLifecycleService
 
         // 新しいスコープで呼ばれる前提なので、State/MoveTree/BoardCacheは初期状態
         // LocalTurnとゲーム開始に必要な設定のみ更新
-        this._state.State.LocalTurn = localTurn;
-        this._state.State.Status = GameStatus.Playing;
-        this._state.State.MoveTimes = [];
-        this._state.State.TimeState = timeState;
+        this._store.Update(state => {
+            state.LocalTurn = localTurn;
+            state.Status = GameStatus.Playing;
+            state.MoveTimes = [];
+            state.TimeState = timeState;
+        });
 
         this._timer.Start();
-        this._events.NotifyStateChanged();
 
         return Task.CompletedTask;
     }
 
     public Task SetLocalTurnAsync(Turn turn)
     {
-        this._state.State.LocalTurn = turn;
-        this._events.NotifyStateChanged();
+        this._store.Update(state => state.LocalTurn = turn);
         return Task.CompletedTask;
     }
 
     public Task ResignAsync()
     {
-        this._state.State.Status = this._state.State.CurrentTurn.GetOpponent().GetWinStatus();
-        this._events.NotifyStateChanged();
+        this._store.Update(state => {
+            state.Status = state.CurrentTurn.GetOpponent().GetWinStatus();
+        });
         return Task.CompletedTask;
     }
 
     public Task RestoreStateAsync(IReadOnlyList<Move> moveHistory, GameStatus status, IReadOnlyList<TimeSpan>? moveTimes = null)
     {
-        var localTurn = this._state.State.LocalTurn;
+        var localTurn = this._store.State.LocalTurn;
         var (board, firstCaptured, secondCaptured, currentTurn) = this._rules.ReconstructBoard(moveHistory);
 
         // MoveTreeに履歴を追加（新しいスコープで呼ばれる前提なので初期状態）
         foreach (var move in moveHistory) {
-            this._state.MoveTree.AddMove(move);
+            this._store.MoveTree.AddMove(move);
         }
 
-        var times = moveTimes?.ToImmutableList();
+        var times = moveTimes?.ToList();
 
-        this._state.State = new GameState(
-            board,
-            currentTurn,
-            status,
-            firstCaptured,
-            secondCaptured,
-            [.. moveHistory],
-            localTurn,
-            null,
-            null,
-            times
-        );
+        this._store.Update(state => {
+            state.Board = board;
+            state.CurrentTurn = currentTurn;
+            state.Status = status;
+            state.FirstCaptured = firstCaptured;
+            state.SecondCaptured = secondCaptured;
+            state.MoveHistory = [.. moveHistory];
+            state.LocalTurn = localTurn;
+            state.ViewingMoveIndex = null;
+            state.ViewingBranchHistory = null;
+            state.MoveTimes = times;
+            state.TimeState = null;
+        });
 
         if (status == GameStatus.Playing) {
             this._timer.Start();
         }
 
-        this._events.NotifyStateChanged();
         return Task.CompletedTask;
     }
 }

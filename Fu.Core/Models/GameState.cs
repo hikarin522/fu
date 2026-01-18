@@ -55,7 +55,7 @@ public static class GameStatusExtensions
 /// <summary>
 /// 持ち駒を管理するクラス
 /// </summary>
-public class CapturedPieces
+public class CapturedPieces : IReadOnlyCapturedPieces
 {
     private readonly Dictionary<PieceType, int> _pieces;
 
@@ -106,8 +106,9 @@ public class CapturedPieces
 
 /// <summary>
 /// 対局の状態を表すクラス（mutable）
+/// IReadOnlyGameStateを実装し、UI層には読み取り専用として公開
 /// </summary>
-public class GameState
+public class GameState : IReadOnlyGameState
 {
     public Board Board { get; set; }
     public Turn CurrentTurn { get; set; }
@@ -120,6 +121,14 @@ public class GameState
     public List<Move>? ViewingBranchHistory { get; set; }
     public List<TimeSpan>? MoveTimes { get; set; }
     public GameTimeState? TimeState { get; set; }
+
+    // IReadOnlyGameState 明示的実装（読み取り専用インターフェース用）
+    IReadOnlyCapturedPieces IReadOnlyGameState.FirstCaptured => this.FirstCaptured;
+    IReadOnlyCapturedPieces IReadOnlyGameState.SecondCaptured => this.SecondCaptured;
+    IReadOnlyList<Move> IReadOnlyGameState.MoveHistory => this.MoveHistory;
+    IReadOnlyList<Move>? IReadOnlyGameState.ViewingBranchHistory => this.ViewingBranchHistory;
+    IReadOnlyList<TimeSpan>? IReadOnlyGameState.MoveTimes => this.MoveTimes;
+    IReadOnlyCapturedPieces IReadOnlyGameState.GetCapturedPieces(Turn turn) => this.GetCapturedPieces(turn);
 
     public GameState()
     {

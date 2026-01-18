@@ -35,4 +35,5 @@ Fu/wwwroot/coi-serviceworker.min.js
 
 ## Claude Code
 .claude/settings.local.json
+.mcp.json
 publish_test/

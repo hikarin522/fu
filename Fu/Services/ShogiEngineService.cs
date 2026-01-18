@@ -141,8 +141,8 @@ public class ShogiEngineService : IAsyncDisposable
     public async Task AnalyzePositionAsync(
         Board board,
         Turn currentTurn,
-        CapturedPieces firstCaptured,
-        CapturedPieces secondCaptured,
+        IReadOnlyCapturedPieces firstCaptured,
+        IReadOnlyCapturedPieces secondCaptured,
         MoveTree moveTree,
         int depth = 0,
         int multiPv = 1)

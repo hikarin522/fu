@@ -58,8 +58,7 @@ public static class GameScopeServiceCollectionExtensions
     public static IServiceCollection AddGameScopedServices(this IServiceCollection services)
     {
         // 対局スコープ内でのみ有効なサービス（Scoped登録だが、IGameScope経由で取得）
-        services.AddScoped<ShogiGameState>();
-        services.AddScoped<IGameEventPublisher, GameEventPublisher>();
+        services.AddScoped<GameStore>();
         services.AddScoped<ITurnTimerService, TurnTimerService>();
         services.AddScoped<IBoardCache, BoardCache>();
 

@@ -11,7 +11,7 @@ public partial class ShogiBoard
 {
     [Inject] private IUsiParser UsiParser { get; set; } = null!;
 
-    [Parameter] public GameState State { get; set; } = GameState.Initial;
+    [Parameter] public IReadOnlyGameState State { get; set; } = GameState.Initial;
     [Parameter] public ShogiGameService GameService { get; set; } = null!;
     [Parameter] public EventCallback<Move> OnMoveMade { get; set; }
     [Parameter] public bool IsFlipped { get; set; }
@@ -33,18 +33,19 @@ public partial class ShogiBoard
     private List<Position> DropLegalMoves { get; set; } = [];
 
     // 閲覧モード用の表示状態（キャッシュ）
-    private (Board board, CapturedPieces firstCaptured, CapturedPieces secondCaptured, Turn currentTurn) DisplayState {
+    private (Board board, IReadOnlyCapturedPieces firstCaptured, IReadOnlyCapturedPieces secondCaptured, Turn currentTurn) DisplayState {
         get {
             if (this.State.IsReviewing) {
-                return this.GameService.GetBoardAtMove(this.State.DisplayMoveIndex);
+                var (board, first, second, turn) = this.GameService.GetBoardAtMove(this.State.DisplayMoveIndex);
+                return (board, first, second, turn);
             }
             return (this.State.Board, this.State.FirstCaptured, this.State.SecondCaptured, this.State.CurrentTurn);
         }
     }
 
     private Board DisplayBoard => this.DisplayState.board;
-    private CapturedPieces DisplayFirstCaptured => this.DisplayState.firstCaptured;
-    private CapturedPieces DisplaySecondCaptured => this.DisplayState.secondCaptured;
+    private IReadOnlyCapturedPieces DisplayFirstCaptured => this.DisplayState.firstCaptured;
+    private IReadOnlyCapturedPieces DisplaySecondCaptured => this.DisplayState.secondCaptured;
     private Turn DisplayCurrentTurn => this.DisplayState.currentTurn;
 
     // 閲覧モードでは表示中の盤面の手番で判定（分岐から再開できる）
@@ -286,7 +287,7 @@ public partial class ShogiBoard
     }
 
     /// <summary>持ち駒パネル内の駒の表示インデックスを取得</summary>
-    private static int GetCapturedPieceIndex(CapturedPieces pieces, char sfenPiece)
+    private static int GetCapturedPieceIndex(IReadOnlyCapturedPieces pieces, char sfenPiece)
     {
         var targetType = sfenPiece switch {
             'R' => PieceType.Rook,

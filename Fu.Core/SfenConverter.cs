@@ -14,7 +14,7 @@ public class SfenConverter : ISfenConverter
     public const string StartPosition = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 
     /// <summary>盤面をSFEN形式に変換</summary>
-    public string ToSfen(Board board, Turn currentTurn, CapturedPieces firstCaptured, CapturedPieces secondCaptured)
+    public string ToSfen(Board board, Turn currentTurn, IReadOnlyCapturedPieces firstCaptured, IReadOnlyCapturedPieces secondCaptured)
     {
         var sb = new StringBuilder();
 
@@ -77,7 +77,7 @@ public class SfenConverter : ISfenConverter
     }
 
     /// <summary>持ち駒をSFEN形式に変換</summary>
-    public string CapturedToSfen(CapturedPieces captured, bool isFirst)
+    public string CapturedToSfen(IReadOnlyCapturedPieces captured, bool isFirst)
     {
         var sb = new StringBuilder();
 

@@ -8,11 +8,11 @@ namespace Fu.Core.Abstractions;
 public interface ISfenConverter
 {
     /// <summary>盤面をSFEN形式に変換</summary>
-    string ToSfen(Board board, Turn currentTurn, CapturedPieces firstCaptured, CapturedPieces secondCaptured);
+    string ToSfen(Board board, Turn currentTurn, IReadOnlyCapturedPieces firstCaptured, IReadOnlyCapturedPieces secondCaptured);
 
     /// <summary>駒をSFEN形式に変換</summary>
     string PieceToSfen(Piece piece);
 
     /// <summary>持ち駒をSFEN形式に変換</summary>
-    string CapturedToSfen(CapturedPieces captured, bool isFirst);
+    string CapturedToSfen(IReadOnlyCapturedPieces captured, bool isFirst);
 }

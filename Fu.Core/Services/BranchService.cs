@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 using Fu.Core.Abstractions;
 using Fu.Core.Models;
 
@@ -13,38 +11,26 @@ public class BranchService : IBranchService
 {
     private readonly IShogiRules _rules;
     private readonly IUsiParser _usiParser;
-    private readonly ShogiGameState _state;
-    private readonly IGameEventPublisher _events;
+    private readonly GameStore _store;
     private readonly ITurnTimerService _timer;
     private readonly IBoardCache _boardCache;
 
     public BranchService(
         IShogiRules rules,
         IUsiParser usiParser,
-        ShogiGameState state,
-        IGameEventPublisher events,
+        GameStore store,
         ITurnTimerService timer,
         IBoardCache boardCache)
     {
         this._rules = rules;
         this._usiParser = usiParser;
-        this._state = state;
-        this._events = events;
+        this._store = store;
         this._timer = timer;
         this._boardCache = boardCache;
     }
 
-    private GameState State
-    {
-        get => this._state.State;
-        set => this._state.State = value;
-    }
-
-    private MoveTree MoveTree
-    {
-        get => this._state.MoveTree;
-        set => this._state.MoveTree = value;
-    }
+    private GameState State => this._store.MutableState;
+    private MoveTree MoveTree => this._store.MoveTree;
 
     #region 分岐再開
 
@@ -53,7 +39,6 @@ public class BranchService : IBranchService
         if (this.State.IsReviewing && this.State.Status == GameStatus.Playing) {
             this.BranchFromCurrentPosition(notifyBranchResumed: true);
             this._timer.Start();
-            this._events.NotifyStateChanged();
         }
         return Task.CompletedTask;
     }
@@ -62,7 +47,6 @@ public class BranchService : IBranchService
     {
         this.RestoreFromMoveHistory(moveHistory, GameStatus.Playing, preserveMoveTree: true);
         this._timer.Start();
-        this._events.NotifyStateChanged();
         return Task.CompletedTask;
     }
 
@@ -75,7 +59,6 @@ public class BranchService : IBranchService
         var newHistory = this.GetCurrentDisplayHistory();
         this.RestoreFromMoveHistory(newHistory, GameStatus.Playing, preserveMoveTree: false, resetTimes: true);
         this._timer.Start();
-        this._events.NotifyStateChanged();
         return Task.CompletedTask;
     }
 
@@ -83,7 +66,6 @@ public class BranchService : IBranchService
     {
         this.RestoreFromMoveHistory(moveHistory, GameStatus.Playing, preserveMoveTree: false, resetTimes: true);
         this._timer.Start();
-        this._events.NotifyStateChanged();
         return Task.CompletedTask;
     }
 
@@ -95,15 +77,13 @@ public class BranchService : IBranchService
     {
         var newHistory = this.GetCurrentDisplayHistory();
         this.RestoreFromMoveHistory(newHistory, GameStatus.Reviewing, preserveMoveTree: true);
-        this._events.NotifyReviewStarted(newHistory);
-        this._events.NotifyStateChanged();
+        this._store.NotifyReviewStarted(newHistory);
         return Task.CompletedTask;
     }
 
     public Task ApplyReviewStartAsync(IReadOnlyList<Move> moveHistory)
     {
         this.RestoreFromMoveHistory(moveHistory, GameStatus.Reviewing, preserveMoveTree: true);
-        this._events.NotifyStateChanged();
         return Task.CompletedTask;
     }
 
@@ -132,7 +112,6 @@ public class BranchService : IBranchService
             this.MoveTree.AddMove(recordedMove);
         }
 
-        this._events.NotifyStateChanged();
         return Task.CompletedTask;
     }
 
@@ -191,9 +170,8 @@ public class BranchService : IBranchService
                 : nodeToAddFrom.AddChild(move);
         }
 
-        // NotifyStateChangedは呼ばない（呼び出し元でStateHasChangedを呼ぶため、
-        // ここで呼ぶとOnGameStateChangedAsync→RequestEvaluationAsync→OnEvaluationUpdatedAsync
-        // →AddMateSequenceBranchAsync→NotifyStateChanged の無限ループになる）
+        // UpdateSilentlyを使用して無限ループを回避
+        // （呼び出し元でStateHasChangedを呼ぶため、ここでは通知不要）
         return Task.FromResult(true);
     }
 
@@ -218,16 +196,18 @@ public class BranchService : IBranchService
             this.MoveTree.AddMove(move);
         }
 
-        this.State.Board = board;
-        this.State.FirstCaptured = firstCaptured;
-        this.State.SecondCaptured = secondCaptured;
-        this.State.CurrentTurn = currentTurn;
-        this.State.MoveHistory = [.. newHistory];
-        this.State.ViewingMoveIndex = null;
-        this.State.ViewingBranchHistory = null;
+        this._store.Update(state => {
+            state.Board = board;
+            state.FirstCaptured = firstCaptured;
+            state.SecondCaptured = secondCaptured;
+            state.CurrentTurn = currentTurn;
+            state.MoveHistory = [.. newHistory];
+            state.ViewingMoveIndex = null;
+            state.ViewingBranchHistory = null;
+        });
 
         if (notifyBranchResumed) {
-            this._events.NotifyBranchResumed(newHistory);
+            this._store.NotifyBranchResumed(newHistory);
         }
     }
 
@@ -244,7 +224,7 @@ public class BranchService : IBranchService
         // 再戦時は分岐履歴をリセット（preserveMoveTree=false）
         // 検討モード時は分岐履歴を保持（preserveMoveTree=true）
         if (!preserveMoveTree) {
-            this.MoveTree = new MoveTree();
+            this._store.ReplaceMoveTree(new MoveTree());
         }
 
         // 盤面が変わるのでキャッシュは無効化
@@ -261,18 +241,19 @@ public class BranchService : IBranchService
                 ? null
                 : this.State.MoveTimes;
 
-        this.State = new GameState(
-            board,
-            currentTurn,
-            status,
-            firstCaptured,
-            secondCaptured,
-            [.. moveHistory],
-            localTurn,
-            null,
-            null,
-            times
-        );
+        this._store.Update(state => {
+            state.Board = board;
+            state.CurrentTurn = currentTurn;
+            state.Status = status;
+            state.FirstCaptured = firstCaptured;
+            state.SecondCaptured = secondCaptured;
+            state.MoveHistory = [.. moveHistory];
+            state.LocalTurn = localTurn;
+            state.ViewingMoveIndex = null;
+            state.ViewingBranchHistory = null;
+            state.MoveTimes = times;
+            state.TimeState = null;
+        });
     }
 
     private void SyncMoveTreeToCurrentPosition()
@@ -329,13 +310,16 @@ public class BranchService : IBranchService
             ? piece with { Type = piece.Type.GetPromotedType() }
             : piece;
 
-        this.State.Board = this.State.Board.MovePiece(from, to, newPiece);
-        this.State.MoveHistory.Add(recordedMove);
-        if (moveTime.HasValue) {
-            (this.State.MoveTimes ??= []).Add(moveTime.Value);
-        }
-        this.State.CurrentTurn = turn.GetOpponent();
-        this.State.ViewingMoveIndex = null;
+        this._store.Update(state => {
+            state.Board = state.Board.MovePiece(from, to, newPiece);
+            state.MoveHistory.Add(recordedMove);
+            if (moveTime.HasValue) {
+                state.MoveTimes ??= [];
+                state.MoveTimes.Add(moveTime.Value);
+            }
+            state.CurrentTurn = turn.GetOpponent();
+            state.ViewingMoveIndex = null;
+        });
 
         return recordedMove;
     }
@@ -351,13 +335,16 @@ public class BranchService : IBranchService
 
         var recordedMove = move.WithTurn(turn);
 
-        this.State.Board = this.State.Board.SetPiece(move.To, new Piece(move.PieceType, turn));
-        this.State.MoveHistory.Add(recordedMove);
-        if (moveTime.HasValue) {
-            (this.State.MoveTimes ??= []).Add(moveTime.Value);
-        }
-        this.State.CurrentTurn = turn.GetOpponent();
-        this.State.ViewingMoveIndex = null;
+        this._store.Update(state => {
+            state.Board = state.Board.SetPiece(move.To, new Piece(move.PieceType, turn));
+            state.MoveHistory.Add(recordedMove);
+            if (moveTime.HasValue) {
+                state.MoveTimes ??= [];
+                state.MoveTimes.Add(moveTime.Value);
+            }
+            state.CurrentTurn = turn.GetOpponent();
+            state.ViewingMoveIndex = null;
+        });
 
         return recordedMove;
     }

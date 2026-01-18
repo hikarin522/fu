@@ -10,48 +10,53 @@ namespace Fu.Core.Services;
 public class GameNavigationService : IGameNavigationService
 {
     private readonly IShogiRules _rules;
-    private readonly ShogiGameState _state;
-    private readonly IGameEventPublisher _events;
+    private readonly GameStore _store;
     private readonly IBoardCache _boardCache;
 
     public GameNavigationService(
         IShogiRules rules,
-        ShogiGameState state,
-        IGameEventPublisher events,
+        GameStore store,
         IBoardCache boardCache)
     {
         this._rules = rules;
-        this._state = state;
-        this._events = events;
+        this._store = store;
         this._boardCache = boardCache;
     }
 
-    private GameState State
-    {
-        get => this._state.State;
-        set => this._state.State = value;
-    }
-
-    private MoveTree MoveTree => this._state.MoveTree;
+    private GameState State => this._store.MutableState;
+    private MoveTree MoveTree => this._store.MoveTree;
 
     public Task GoBackAsync()
     {
-        var currentIndex = this.State.DisplayMoveIndex;
-        if (currentIndex > 0) {
-            this.State.ViewingMoveIndex = currentIndex - 1;
-            this._events.NotifyStateChanged();
+        // MoveTreeも同期（検討モード中、または閲覧中の評価値キャッシュ参照用）
+        if ((this.State.Status == GameStatus.Reviewing || this.State.IsReviewing)
+            && this.MoveTree.CurrentNode is not null) {
+            this.MoveTree.GoBack();
         }
+
+        this._store.Update(state => {
+            if (state.DisplayMoveIndex > 0) {
+                state.ViewingMoveIndex = state.DisplayMoveIndex - 1;
+            }
+        });
         return Task.CompletedTask;
     }
 
     public Task GoForwardAsync()
     {
-        var currentIndex = this.State.DisplayMoveIndex;
-        if (currentIndex < this.State.MoveHistory.Count) {
-            var newIndex = currentIndex + 1;
-            this.State.ViewingMoveIndex = newIndex == this.State.MoveHistory.Count ? null : newIndex;
-            this._events.NotifyStateChanged();
+        // MoveTreeも同期（検討モード中、または閲覧中の評価値キャッシュ参照用）
+        if ((this.State.Status == GameStatus.Reviewing || this.State.IsReviewing)
+            && this.State.DisplayMoveIndex < this.State.MoveHistory.Count) {
+            this.MoveTree.GoForward();
         }
+
+        this._store.Update(state => {
+            var currentIndex = state.DisplayMoveIndex;
+            if (currentIndex < state.MoveHistory.Count) {
+                var newIndex = currentIndex + 1;
+                state.ViewingMoveIndex = newIndex == state.MoveHistory.Count ? null : newIndex;
+            }
+        });
         return Task.CompletedTask;
     }
 
@@ -65,14 +70,14 @@ public class GameNavigationService : IGameNavigationService
                 var branchMoves = currentNode.GetMoves();
                 var (board, firstCaptured, secondCaptured, currentTurn) = this._rules.ReconstructBoard(branchMoves);
 
-                this.State.Board = board;
-                this.State.FirstCaptured = firstCaptured;
-                this.State.SecondCaptured = secondCaptured;
-                this.State.CurrentTurn = currentTurn;
-                this.State.MoveHistory = [.. branchMoves];
-                this.State.ViewingMoveIndex = branchMoves.Count == this.State.MoveHistory.Count ? null : branchMoves.Count;
-
-                this._events.NotifyStateChanged();
+                this._store.Update(state => {
+                    state.Board = board;
+                    state.FirstCaptured = firstCaptured;
+                    state.SecondCaptured = secondCaptured;
+                    state.CurrentTurn = currentTurn;
+                    state.MoveHistory = [.. branchMoves];
+                    state.ViewingMoveIndex = null;
+                });
             }
         }
         return Task.CompletedTask;
@@ -82,20 +87,27 @@ public class GameNavigationService : IGameNavigationService
     {
         if (this.State.IsReviewing) {
             this.GoToMoveHistoryEnd();
-            this.State.ViewingMoveIndex = null;
-            this.State.ViewingBranchHistory = null;
-            this._events.NotifyStateChanged();
+            this._store.Update(state => {
+                state.ViewingMoveIndex = null;
+                state.ViewingBranchHistory = null;
+            });
         }
         return Task.CompletedTask;
     }
 
     public Task SetViewingMoveIndexAsync(int moveIndex)
     {
-        var newIndex = moveIndex >= this.State.MoveHistory.Count ? null : (int?)moveIndex;
-        if (this.State.ViewingMoveIndex != newIndex) {
-            this.State.ViewingMoveIndex = newIndex;
-            this._events.NotifyStateChanged();
+        // MoveTreeも同期（検討モード中、または閲覧中の評価値キャッシュ参照用）
+        if (this.State.Status == GameStatus.Reviewing || this.State.IsReviewing) {
+            this.SyncMoveTreeToPosition(moveIndex);
         }
+
+        this._store.Update(state => {
+            var newIndex = moveIndex >= state.MoveHistory.Count ? null : (int?)moveIndex;
+            if (state.ViewingMoveIndex != newIndex) {
+                state.ViewingMoveIndex = newIndex;
+            }
+        });
         return Task.CompletedTask;
     }
 
@@ -103,31 +115,35 @@ public class GameNavigationService : IGameNavigationService
     {
         this.MoveTree.GoTo(node);
 
-        if (node is null) {
-            this.State.ViewingMoveIndex = 0;
-            this.State.ViewingBranchHistory = null;
-        } else {
+        this._store.Update(state => {
+            if (node is null) {
+                state.ViewingMoveIndex = 0;
+                state.ViewingBranchHistory = null;
+                return;
+            }
+
             var nodeMoves = node.GetMoves();
-            var isExactSamePath = nodeMoves.Count == this.State.MoveHistory.Count &&
-                                  nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, this.State.MoveHistory[i])).All(x => x);
+            var isExactSamePath = nodeMoves.Count == state.MoveHistory.Count &&
+                                  nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, state.MoveHistory[i])).All(x => x);
 
             if (isExactSamePath) {
-                this.State.ViewingMoveIndex = null;
-                this.State.ViewingBranchHistory = null;
-            } else {
-                var isSamePath = nodeMoves.Count <= this.State.MoveHistory.Count &&
-                                 nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, this.State.MoveHistory[i])).All(x => x);
-
-                if (isSamePath) {
-                    this.State.ViewingMoveIndex = node.Depth;
-                    this.State.ViewingBranchHistory = null;
-                } else {
-                    this.State.ViewingMoveIndex = null;
-                    this.State.ViewingBranchHistory = [.. nodeMoves];
-                }
+                state.ViewingMoveIndex = null;
+                state.ViewingBranchHistory = null;
+                return;
             }
-        }
-        this._events.NotifyStateChanged();
+
+            var isSamePath = nodeMoves.Count <= state.MoveHistory.Count &&
+                             nodeMoves.Select((m, i) => MoveNode.IsSameMove(m, state.MoveHistory[i])).All(x => x);
+
+            if (isSamePath) {
+                state.ViewingMoveIndex = node.Depth;
+                state.ViewingBranchHistory = null;
+                return;
+            }
+
+            state.ViewingMoveIndex = null;
+            state.ViewingBranchHistory = [.. nodeMoves];
+        });
         return Task.CompletedTask;
     }
 
