@@ -286,8 +286,8 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
             }
         }
         finally {
-            // ウォッチドッグ停止
-            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.stopWatchdog");
+            // ウォッチドッグ停止（デッドロック防止のため待機しない）
+            _ = this._jsRuntime.InvokeVoidAsync("ShogiEngine.stopWatchdog");
 
             // キャンセル時はstopを送信（bestmoveを待たない - 次のGoAsync呼び出し時に処理）
             if (this._isAnalyzing && !this._stopRequested) {
