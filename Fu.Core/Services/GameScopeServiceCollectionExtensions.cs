@@ -21,16 +21,17 @@ public static class GameScopeServiceCollectionExtensions
     }
 
     /// <summary>
-    /// MessagePipeのゲームイベントを登録（スコープ用）
+    /// MessagePipeのゲームイベントを登録
     /// </summary>
     public static IServiceCollection AddGameEvents(this IServiceCollection services)
     {
-        // MessagePipe本体を登録（Scoped lifetime for game scope compatibility）
+        // MessagePipe本体を登録（Singleton lifetime）
+        // ゲームスコープからUIへイベントを伝播するため、Publisher/SubscriberはSingletonで共有
         // .NETでは AddMessagePipe() だけで IPublisher<T>/ISubscriber<T> が自動解決される
         services.AddMessagePipe(options =>
         {
-            // ゲームスコープと整合性を取るため Scoped lifetime を使用
-            options.InstanceLifetime = InstanceLifetime.Scoped;
+            // ゲームスコープ内で発行されたイベントをタブスコープのUIで受信するため Singleton を使用
+            options.InstanceLifetime = InstanceLifetime.Singleton;
         });
 
         return services;
