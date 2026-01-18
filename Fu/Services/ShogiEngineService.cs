@@ -19,6 +19,7 @@ public class ShogiEngineService : IDisposable
     private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
 
     private CancellationTokenSource? _analysisCts;
+    private Task? _analysisTask;
     private int _newDepthCandidateCount;
     private int _lastMultiPv;
 
@@ -139,7 +140,7 @@ public class ShogiEngineService : IDisposable
         this._analysisCts = new CancellationTokenSource();
 
         // バックグラウンドでストリームを処理
-        _ = this.ProcessAnalysisStreamAsync(sfen, depth, this._analysisCts.Token);
+        this._analysisTask = this.ProcessAnalysisStreamAsync(sfen, depth, this._analysisCts.Token);
     }
 
     private async Task ProcessAnalysisStreamAsync(string sfen, int depth, CancellationToken cancellationToken)
@@ -160,6 +161,10 @@ public class ShogiEngineService : IDisposable
         catch (OperationCanceledException) {
             // キャンセルは正常終了
         }
+        catch (Exception ex) {
+            // エンジン未準備等のエラーはログ出力して無視
+            Console.WriteLine($"[ShogiEngine] Analysis error: {ex.Message}");
+        }
     }
 
     /// <summary>分析を停止</summary>
@@ -169,6 +174,12 @@ public class ShogiEngineService : IDisposable
             await this._analysisCts.CancelAsync();
             this._analysisCts.Dispose();
             this._analysisCts = null;
+        }
+
+        // 分析タスクの完了を待機
+        if (this._analysisTask is not null) {
+            await this._analysisTask;
+            this._analysisTask = null;
         }
     }
 

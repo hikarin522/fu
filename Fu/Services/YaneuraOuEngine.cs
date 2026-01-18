@@ -306,7 +306,7 @@ public sealed class YaneuraOuEngine : IUsiEngine, IAsyncDisposable
         await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "stop");
 
         // bestmoveが来るまで待機（タイムアウト付き）
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         try {
             await foreach (var result in this._goChannel.Reader.ReadAllAsync(cts.Token)) {
                 if (result is UsiGoResult.BestMove) {
