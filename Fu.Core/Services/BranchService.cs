@@ -125,8 +125,8 @@ public class BranchService : IBranchService
             return Task.FromResult(false);
         }
 
-        var moves = usiMoves.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (moves.Length == 0) {
+        var usiMoveList = usiMoves.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (usiMoveList.Length == 0) {
             return Task.FromResult(false);
         }
 
@@ -134,15 +134,14 @@ public class BranchService : IBranchService
         var viewingIndex = this.State.ViewingMoveIndex ?? displayHistory.Count;
         var (board, firstCaptured, secondCaptured, currentTurn) = this.GetBoardAtMove(viewingIndex);
 
-        var currentNode = this.MoveTree.CurrentNode;
-
+        // 全ての手をパース
         var parsedMoves = new List<Move>();
         var tempBoard = board;
         var tempFirstCaptured = firstCaptured;
         var tempSecondCaptured = secondCaptured;
         var tempTurn = currentTurn;
 
-        foreach (var usiMove in moves) {
+        foreach (var usiMove in usiMoveList) {
             var move = this._usiParser.ParseMove(usiMove, tempBoard, tempTurn);
             if (move is null) {
                 return Task.FromResult(false);
@@ -163,15 +162,19 @@ public class BranchService : IBranchService
             tempTurn = tempTurn.GetOpponent();
         }
 
-        var nodeToAddFrom = currentNode;
+        // 全く同じ手順が既に存在するかチェック
+        if (this.MoveTree.HasExactSequence(parsedMoves)) {
+            return Task.FromResult(false);
+        }
+
+        // 分岐を追加
+        var nodeToAddFrom = this.MoveTree.CurrentNode;
         foreach (var move in parsedMoves) {
             nodeToAddFrom = nodeToAddFrom is null
                 ? this.MoveTree.AddMoveWithoutAdvance(move)
                 : nodeToAddFrom.AddChild(move);
         }
 
-        // UpdateSilentlyを使用して無限ループを回避
-        // （呼び出し元でStateHasChangedを呼ぶため、ここでは通知不要）
         return Task.FromResult(true);
     }
 

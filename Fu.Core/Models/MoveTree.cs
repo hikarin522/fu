@@ -60,6 +60,10 @@ public sealed class MoveNode
         a.IsDrop == b.IsDrop &&
         a.From == b.From;
 
+    /// <summary>指定した手と同じ子ノードが存在するか</summary>
+    public bool HasChildWithMove(Move move) =>
+        this._children.Any(c => IsSameMove(c.Move, move));
+
     /// <summary>ルートからこのノードまでのパスを取得</summary>
     public IReadOnlyList<MoveNode> GetPath()
     {
@@ -238,6 +242,33 @@ public sealed class MoveTree
 
     /// <summary>ツリー内の分岐点の総数（子が2つ以上あるノードの数）</summary>
     public int TotalBranchCount => this._tree.TotalBranchCount;
+
+    /// <summary>現在位置から指定した手順が完全に一致する分岐が存在するか</summary>
+    public bool HasExactSequence(IReadOnlyList<Move> moves)
+    {
+        if (moves.Count == 0) {
+            return true;
+        }
+
+        var currentChildren = this.CurrentNode?.Children ?? (IReadOnlyList<MoveNode>)this._rootChildren;
+        var node = currentChildren.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, moves[0]));
+
+        for (var i = 0; i < moves.Count; i++) {
+            if (node is null) {
+                return false;
+            }
+
+            if (!MoveNode.IsSameMove(node.Move, moves[i])) {
+                return false;
+            }
+
+            if (i < moves.Count - 1) {
+                node = node.Children.FirstOrDefault(c => MoveNode.IsSameMove(c.Move, moves[i + 1]));
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>全ての手（現在のラインのフラット表示用）</summary>
     public IReadOnlyList<Move> GetFlatMoves()
