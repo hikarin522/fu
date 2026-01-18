@@ -165,8 +165,9 @@ public class BranchService : IBranchService
         // MoveTree.CurrentNodeを使用（GoToNodeAsyncで同期されている）
         var nodeToAddFrom = this.MoveTree.CurrentNode;
 
-        // 全く同じ手順が既に存在するかチェック
-        if (this.HasExactSequenceFromNode(nodeToAddFrom, parsedMoves)) {
+        // 全く同じ手順が既に存在するかチェック（現在ノードから、またはツリー全体で）
+        if (this.HasExactSequenceFromNode(nodeToAddFrom, parsedMoves) ||
+            this.HasExactSequenceInTree(parsedMoves)) {
             return Task.FromResult(false);
         }
 
@@ -322,6 +323,57 @@ public class BranchService : IBranchService
         }
 
         return true;
+    }
+
+    /// <summary>ツリー全体で完全一致する手順が存在するかチェック</summary>
+#pragma warning disable CA1859
+    private bool HasExactSequenceInTree(IReadOnlyList<Move> moves)
+#pragma warning restore CA1859
+    {
+        if (moves.Count == 0) {
+            return true;
+        }
+
+        // ツリー全体から最初の手と一致するノードを探す
+        return SearchSequenceInNodes(this.MoveTree.RootChildren, moves);
+    }
+
+    private static bool SearchSequenceInNodes(IReadOnlyList<MoveNode> nodes, IReadOnlyList<Move> moves)
+    {
+        foreach (var node in nodes) {
+            // このノードから手順が一致するかチェック
+            if (MatchesSequence(node, moves, 0)) {
+                return true;
+            }
+
+            // 子ノードも再帰的に検索
+            if (SearchSequenceInNodes(node.Children, moves)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool MatchesSequence(MoveNode node, IReadOnlyList<Move> moves, int moveIndex)
+    {
+        if (!MoveNode.IsSameMove(node.Move, moves[moveIndex])) {
+            return false;
+        }
+
+        // 最後の手まで一致
+        if (moveIndex == moves.Count - 1) {
+            return true;
+        }
+
+        // 次の手を子ノードから探す
+        foreach (var child in node.Children) {
+            if (MatchesSequence(child, moves, moveIndex + 1)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>移動を適用（検証済み前提）</summary>

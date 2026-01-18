@@ -146,7 +146,8 @@ public partial class Index : IAsyncDisposable
     }
 
     // 評価値表示（観戦者・対局終了後・検討中は常に全表示）
-    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded || (this.GameService?.State.IsReviewing ?? false);
+    // 観戦者または対局終了時のみ全評価表示（対局者が棋譜を遡っても候補手等は非表示）
+    private bool CanShowAllEvaluation => this.IsSpectator || this.IsGameEnded;
     private bool ShowAdvantage => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowAdvantage);
     private bool ShowEvaluationValue => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowEvaluationValue);
     private bool ShowHasMate => this.CanShowAllEvaluation || (this.IsPlayer && this.CurrentEvaluationOptions.ShowHasMate);
@@ -626,7 +627,7 @@ public partial class Index : IAsyncDisposable
         }
 
         this.UnsubscribeFromEvents();
-        await this.EngineService.DisposeAsync();
+        this.EngineService.Dispose();
 
         // IGameTransportのDisposeは別途管理
         if (this.TransportConnection is IAsyncDisposable disposable) {

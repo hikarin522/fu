@@ -31,6 +31,7 @@ builder.Services.AddScoped<IGameTransport>(sp => sp.GetRequiredService<WebRtcSer
 builder.Services.AddScoped<ITransportConnection>(sp => sp.GetRequiredService<WebRtcService>());
 builder.Services.AddScoped<ITransportSender>(sp => sp.GetRequiredService<WebRtcService>());
 
+builder.Services.AddScoped<IUsiEngine, YaneuraOuEngine>();
 builder.Services.AddScoped<ShogiEngineService>();
 builder.Services.AddScoped<UserSettingsService>();
 builder.Services.AddScoped<LobbyService>();

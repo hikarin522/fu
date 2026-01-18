@@ -63,14 +63,16 @@ public class GameLifecycleService : IGameLifecycleService
     public Task ResignAsync()
     {
         this._store.Update(state => {
-            state.Status = state.CurrentTurn.GetOpponent().GetWinStatus();
+            // 終局したら即検討モードへ
+            state.Status = GameStatus.Reviewing;
         });
         return Task.CompletedTask;
     }
 
-    public Task RestoreStateAsync(IReadOnlyList<Move> moveHistory, GameStatus status, IReadOnlyList<TimeSpan>? moveTimes = null)
-    {
-        var localTurn = this._store.State.LocalTurn;
+        this._store.Update(state => {
+            // 終局したら即検討モードへ
+            state.Status = GameStatus.Reviewing;
+        });
         var (board, firstCaptured, secondCaptured, currentTurn) = this._rules.ReconstructBoard(moveHistory);
 
         // MoveTreeに履歴を追加（新しいスコープで呼ばれる前提なので初期状態）

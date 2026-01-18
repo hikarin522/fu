@@ -206,8 +206,8 @@ public class GameState : IReadOnlyGameState
     /// <summary>過去の局面を見ているかどうか</summary>
     public bool IsViewingPastPosition => this.ViewingMoveIndex.HasValue && this.ViewingMoveIndex.Value < this.MoveHistory.Count;
 
-    /// <summary>棋譜閲覧モード中かどうか（過去の局面を見ている、または別のブランチを見ている）</summary>
-    public bool IsReviewing => this.IsViewingDifferentBranch || this.IsViewingPastPosition;
+    /// <summary>検討モード中かどうか（状態がReviewingのときのみtrue）</summary>
+    public bool IsReviewing => this.Status == GameStatus.Reviewing;
 
     /// <summary>対局中のブランチの最新局面を見ているかどうか</summary>
     public bool IsAtActiveBranchLatest => !this.IsReviewing;

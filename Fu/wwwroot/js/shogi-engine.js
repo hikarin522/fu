@@ -1,72 +1,91 @@
 // YaneuraOu WASM Engine wrapper for Blazor
+// WebWorkerでエンジンを実行し、メインスレッドのブロックを防ぐ
 (() => {
     'use strict';
 
-    let engine = null;
+    let worker = null;
     let dotNetReference = null;
+    let initPromise = null;
+    let isReady = false;
 
     /**
-     * エンジンを初期化し、USIハンドシェイクを完了する
+     * ワーカーを作成してエンジンを初期化
+     * @param {boolean} force - 強制再初期化
      * @returns {Promise<boolean>} 初期化成功時true
      */
-    async function init() {
-        if (engine) {
-            return true;
+    async function init(force = false) {
+        if (worker && !force) {
+            return isReady;
         }
 
+        // 既存のワーカーを終了
+        if (worker) {
+            worker.terminate();
+            worker = null;
+        }
+
+        isReady = false;
+
         try {
-            // YaneuraOuスクリプトを動的ロード
-            await loadScript('lib/yaneuraou/yaneuraou.js');
+            // 新しいワーカーを作成
+            worker = new Worker('js/shogi-engine-worker.js');
 
-            // WASMモジュールを初期化
-            const yaneuraou = await YaneuraOu({
-                locateFile: (path) => `lib/yaneuraou/${path}`
+            // メッセージハンドラを設定
+            worker.onmessage = (e) => {
+                const { type, data } = e.data;
+
+                switch (type) {
+                    case 'message':
+                        dotNetReference?.invokeMethodAsync('OnEngineMessage', data);
+                        break;
+
+                    case 'init':
+                        // initPromiseのresolveで処理される
+                        break;
+
+                    case 'crash':
+                    case 'error':
+                        console.error('Engine worker crashed:', data);
+                        isReady = false;
+                        dotNetReference?.invokeMethodAsync('OnEngineCrash');
+                        break;
+                }
+            };
+
+            // ワーカーエラーハンドラ（ワーカー自体のクラッシュを検出）
+            worker.onerror = (error) => {
+                console.error('Worker error:', error);
+                isReady = false;
+                dotNetReference?.invokeMethodAsync('OnEngineCrash');
+            };
+
+            // 初期化を待機
+            initPromise = new Promise((resolve) => {
+                const handler = (e) => {
+                    if (e.data.type === 'init') {
+                        worker.removeEventListener('message', handler);
+                        resolve(e.data.data);
+                    }
+                };
+                worker.addEventListener('message', handler);
+                worker.postMessage({ type: 'init' });
             });
 
-            // メッセージリスナーを設定
-            yaneuraou.addMessageListener((line) => {
-                dotNetReference?.invokeMethodAsync('OnEngineMessage', line);
-            });
-
-            engine = yaneuraou;
-
-            // USIハンドシェイク（usiok待機）
-            await waitForMessage('usiok', () => engine.postMessage('usi'));
-
-            return true;
+            isReady = await initPromise;
+            return isReady;
         } catch (error) {
-            console.error('Failed to initialize shogi engine:', error);
+            console.error('Failed to create engine worker:', error);
             return false;
         }
     }
 
     /**
-     * スクリプトを動的にロード
+     * エンジンを再起動
+     * @returns {Promise<boolean>} 再起動成功時true
      */
-    function loadScript(src) {
-        return new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = src;
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
-    }
-
-    /**
-     * 特定のメッセージを待機
-     */
-    function waitForMessage(expected, sendCommand) {
-        return new Promise((resolve) => {
-            const handler = (line) => {
-                if (line === expected) {
-                    engine.removeMessageListener(handler);
-                    resolve();
-                }
-            };
-            engine.addMessageListener(handler);
-            sendCommand();
-        });
+    async function restart() {
+        console.log('Restarting shogi engine...');
+        return await init(true);
     }
 
     /**
@@ -80,26 +99,21 @@
      * エンジンにコマンドを送信
      */
     function sendCommand(command) {
-        if (!engine) {
+        if (!worker || !isReady) {
             return false;
         }
-        engine.postMessage(command);
+        worker.postMessage({ type: 'command', data: command });
         return true;
     }
 
     /**
      * 局面の評価をリクエスト
-     * stop → position → go を一括実行
      */
     function requestEvaluation(sfen, depth) {
-        if (!engine) {
+        if (!worker || !isReady) {
             return false;
         }
-
-        engine.postMessage('stop');
-        engine.postMessage('position sfen ' + sfen);
-        engine.postMessage(depth > 0 ? `go depth ${depth}` : 'go infinite');
-
+        worker.postMessage({ type: 'evaluate', data: { sfen, depth } });
         return true;
     }
 
@@ -107,10 +121,10 @@
      * 探索を停止
      */
     function stop() {
-        if (!engine) {
+        if (!worker || !isReady) {
             return false;
         }
-        engine.postMessage('stop');
+        worker.postMessage({ type: 'stop' });
         return true;
     }
 
@@ -124,6 +138,7 @@
     // Blazor用にエクスポート
     window.ShogiEngine = {
         init,
+        restart,
         setCallback,
         sendCommand,
         requestEvaluation,

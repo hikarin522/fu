@@ -1,5 +1,3 @@
-using Microsoft.JSInterop;
-
 using R3;
 
 using Fu.Core;
@@ -9,22 +7,18 @@ using Fu.Core.Models;
 namespace Fu.Services;
 
 /// <summary>
-/// YaneuraOu WASM エンジンとのインターフェース
+/// エンジン分析サービス（評価値の解釈、キャッシュ管理）
 /// </summary>
-public class ShogiEngineService : IAsyncDisposable
+public class ShogiEngineService : IDisposable
 {
-    private readonly IJSRuntime _jsRuntime;
+    private readonly IUsiEngine _engine;
     private readonly IUsiParser _usiParser;
     private readonly ISfenConverter _sfenConverter;
     private readonly Subject<Unit> _evaluationUpdated = new();
     private readonly Dictionary<int, CandidateMove> _candidates = [];
     private readonly Dictionary<int, CandidateMove> _previousCandidates = [];
+    private readonly IDisposable _subscriptions;
 
-    private DotNetObjectReference<ShogiEngineService>? _dotNetRef;
-    private TaskCompletionSource? _readyTcs;
-    private bool _initialized;
-    private bool _isReady;
-    private bool _isAnalyzing;
     private int _newDepthCandidateCount;
     private int _lastMultiPv;
 
@@ -32,11 +26,6 @@ public class ShogiEngineService : IAsyncDisposable
     private MoveTree? _currentMoveTree;
     private MoveNode? _currentNode;
     private Turn _currentTurn = Turn.First;
-
-    // 最後に分析を開始したノード（遅延結果のキャッシュ更新用）
-    private MoveTree? _lastAnalyzedMoveTree;
-    private MoveNode? _lastAnalyzedNode;
-    private Turn _lastAnalyzedTurn;
 
     #region Public Properties
 
@@ -62,69 +51,40 @@ public class ShogiEngineService : IAsyncDisposable
     public IReadOnlyList<CandidateMove> Candidates => this.GetMergedCandidates();
 
     /// <summary>エンジンが利用可能か</summary>
-    public bool IsAvailable { get; private set; }
+    public bool IsAvailable => this._engine.IsAvailable;
 
     /// <summary>分析中か</summary>
-    public bool IsAnalyzing => this._isAnalyzing;
+    public bool IsAnalyzing => this._engine.IsAnalyzing;
 
     /// <summary>評価値が更新された時</summary>
     public Observable<Unit> EvaluationUpdated => this._evaluationUpdated;
 
     #endregion
 
-    public ShogiEngineService(IJSRuntime jsRuntime, IUsiParser usiParser, ISfenConverter sfenConverter)
+    public ShogiEngineService(IUsiEngine engine, IUsiParser usiParser, ISfenConverter sfenConverter)
     {
-        this._jsRuntime = jsRuntime;
+        this._engine = engine;
         this._usiParser = usiParser;
         this._sfenConverter = sfenConverter;
+
+        // エンジンからのイベントを購読
+        this._subscriptions = Disposable.Combine(
+            this._engine.InfoReceived.Subscribe(this.HandleInfo),
+            this._engine.BestMoveReceived.Subscribe(this.HandleBestMove)
+        );
     }
 
     #region Initialization
 
     /// <summary>エンジンを初期化</summary>
-    public async Task<bool> InitializeAsync()
+    public Task<bool> InitializeAsync() => this._engine.InitializeAsync();
+
+    /// <summary>エンジンを再起動</summary>
+    public async Task<bool> RestartAsync()
     {
-        if (this._initialized) {
-            return this.IsAvailable;
-        }
-
-        this._initialized = true;
-
-        try {
-            // Cross-Origin Isolation確認（SharedArrayBufferに必要）
-            if (!await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.isCrossOriginIsolated")) {
-                return this.IsAvailable = false;
-            }
-
-            // エンジン初期化（JSでUSIハンドシェイク完了まで待機）
-            if (!await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.init")) {
-                return this.IsAvailable = false;
-            }
-
-            // コールバック設定
-            this._dotNetRef = DotNetObjectReference.Create(this);
-            await this._jsRuntime.InvokeVoidAsync("ShogiEngine.setCallback", this._dotNetRef);
-
-            this.IsAvailable = true;
-
-            // readyok待機
-            this._readyTcs = new TaskCompletionSource();
-            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", "isready");
-
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            try {
-                await this._readyTcs.Task.WaitAsync(cts.Token);
-                this._isReady = true;
-            }
-            catch (OperationCanceledException) {
-                return this.IsAvailable = false;
-            }
-
-            return true;
-        }
-        catch {
-            return this.IsAvailable = false;
-        }
+        this.ResetEvaluation();
+        this._lastMultiPv = 0;
+        return await this._engine.RestartAsync();
     }
 
     #endregion
@@ -141,7 +101,7 @@ public class ShogiEngineService : IAsyncDisposable
         int depth = 0,
         int multiPv = 1)
     {
-        if (!this.IsAvailable || !this._isReady) {
+        if (!this._engine.IsAvailable) {
             return;
         }
 
@@ -151,9 +111,6 @@ public class ShogiEngineService : IAsyncDisposable
         this._currentMoveTree = moveTree;
         this._currentNode = currentNode;
         this._currentTurn = currentTurn;
-        this._lastAnalyzedMoveTree = moveTree;
-        this._lastAnalyzedNode = currentNode;
-        this._lastAnalyzedTurn = currentTurn;
 
         // キャッシュをチェック
         var cached = GetCachedEvaluation(moveTree, currentNode);
@@ -169,28 +126,24 @@ public class ShogiEngineService : IAsyncDisposable
             this.ResetEvaluation();
         }
 
-        this._isAnalyzing = true;
-
         // MultiPV設定（変更時のみ）
         if (multiPv != this._lastMultiPv) {
-            await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.sendCommand", $"setoption name MultiPV value {multiPv}");
+            await this._engine.SendCommandAsync($"setoption name MultiPV value {multiPv}");
             this._lastMultiPv = multiPv;
         }
 
         // 分析開始
         var sfen = this._sfenConverter.ToSfen(board, currentTurn, firstCaptured, secondCaptured);
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.requestEvaluation", sfen, depth);
+        await this._engine.GoAsync(sfen, depth);
     }
 
     /// <summary>分析を停止</summary>
     public async Task StopAnalysisAsync()
     {
-        if (!this.IsAvailable) {
-            return;
+        var bestMove = await this._engine.StopAsync();
+        if (bestMove is not null) {
+            this.HandleBestMove(bestMove);
         }
-
-        this._isAnalyzing = false;
-        await this._jsRuntime.InvokeAsync<bool>("ShogiEngine.stop");
     }
 
     private void ResetEvaluation()
@@ -205,67 +158,16 @@ public class ShogiEngineService : IAsyncDisposable
 
     #endregion
 
-    #region Message Handling
+    #region Event Handlers
 
-    /// <summary>エンジンからのメッセージを処理</summary>
-    [JSInvokable]
-    public Task OnEngineMessage(string message)
+    private void HandleInfo(UsiInfo info)
     {
-        if (message == "readyok") {
-            this._readyTcs?.TrySetResult();
-            return Task.CompletedTask;
-        }
-
-        if (!this._isReady) {
-            return Task.CompletedTask;
-        }
-
-        if (message.StartsWith("info ", StringComparison.Ordinal)) {
-            if (this.ParseInfoMessage(message)) {
-                this._evaluationUpdated.OnNext(Unit.Default);
-            }
-        }
-        else if (message.StartsWith("bestmove ", StringComparison.Ordinal)) {
-            this.HandleBestMove(message);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    private void HandleBestMove(string message)
-    {
-        var parts = message.Split(' ');
-        if (parts.Length >= 2) {
-            this.BestMove = parts[1];
-        }
-
-        this._isAnalyzing = false;
-        this.SaveToCurrentNode();
-        this._evaluationUpdated.OnNext(Unit.Default);
-    }
-
-    /// <summary>infoメッセージをパース</summary>
-    /// <returns>UIを更新すべき場合true</returns>
-    private bool ParseInfoMessage(string message)
-    {
-        var info = ParseUsiInfo(message.Split(' '));
-
-        // 現在の局面かチェック
-        var isCurrentPosition = this._currentMoveTree is not null
-            && ReferenceEquals(this._lastAnalyzedMoveTree, this._currentMoveTree)
-            && ReferenceEquals(this._lastAnalyzedNode, this._currentNode);
-
-        if (!isCurrentPosition) {
-            this.UpdateCacheOnly(info);
-            return false;
-        }
-
         var isNewDepth = info.Depth.HasValue && info.Depth.Value > this.Depth;
         var hasMate = info.MateIn.HasValue && this.MateIn is null;
 
         // 詰み検出後はcpスコアで上書きしない
         if (this.MateIn.HasValue && !info.MateIn.HasValue) {
-            return false;
+            return;
         }
 
         // 評価値を先手視点に正規化
@@ -289,7 +191,16 @@ public class ShogiEngineService : IAsyncDisposable
             this._newDepthCandidateCount = this._candidates.Count;
         }
 
-        return isNewDepth || hasMate;
+        if (isNewDepth || hasMate) {
+            this._evaluationUpdated.OnNext(Unit.Default);
+        }
+    }
+
+    private void HandleBestMove(UsiBestMove bestMove)
+    {
+        this.BestMove = bestMove.Move;
+        this.SaveToCurrentNode();
+        this._evaluationUpdated.OnNext(Unit.Default);
     }
 
     private void UpdateMainEvaluation(UsiInfo info, int? normalizedScore, bool isNewDepth, bool hasMate)
@@ -374,33 +285,6 @@ public class ShogiEngineService : IAsyncDisposable
         SetCachedEvaluation(this._currentMoveTree, this._currentNode, cached);
     }
 
-    private void UpdateCacheOnly(UsiInfo info)
-    {
-        if (!info.Depth.HasValue || (info.MultiPv.HasValue && info.MultiPv.Value != 1) || this._lastAnalyzedMoveTree is null) {
-            return;
-        }
-
-        var cached = GetCachedEvaluation(this._lastAnalyzedMoveTree, this._lastAnalyzedNode);
-        if (cached is null || info.Depth.Value <= cached.Depth) {
-            return;
-        }
-
-        var normalizedScore = this._lastAnalyzedTurn == Turn.Second ? -info.Score : info.Score;
-        var normalizedMate = this._lastAnalyzedTurn == Turn.Second ? -info.MateIn : info.MateIn;
-
-        var newCached = new CachedEvaluation(
-            normalizedScore ?? cached.Evaluation,
-            normalizedMate ?? cached.MateIn,
-            cached.MateTurn,
-            info.Move ?? cached.BestMove,
-            info.Pv ?? cached.PrincipalVariation,
-            info.Depth.Value,
-            cached.Candidates
-        );
-
-        SetCachedEvaluation(this._lastAnalyzedMoveTree, this._lastAnalyzedNode, newCached);
-    }
-
     #endregion
 
     #region Candidates
@@ -435,58 +319,15 @@ public class ShogiEngineService : IAsyncDisposable
 
     #region USI Parsing
 
-    private record struct UsiInfo(int? MultiPv, int? Depth, int? Score, int? MateIn, string? Pv, string? Move);
-
-    private static UsiInfo ParseUsiInfo(string[] parts)
-    {
-        int? multipv = null, depth = null, score = null, mateIn = null;
-        string? pv = null, move = null;
-
-        for (var i = 0; i < parts.Length; i++) {
-            switch (parts[i]) {
-                case "multipv" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var mpv):
-                    multipv = mpv;
-                    break;
-
-                case "depth" when i + 1 < parts.Length && int.TryParse(parts[i + 1], out var d):
-                    depth = d;
-                    break;
-
-                case "score" when i + 2 < parts.Length:
-                    if (parts[i + 1] == "cp" && int.TryParse(parts[i + 2], out var cp)) {
-                        score = cp;
-                    }
-                    else if (parts[i + 1] == "mate" && int.TryParse(parts[i + 2], out var mate)) {
-                        score = mate > 0 ? EvaluationConstants.MateScoreBase - mate : -EvaluationConstants.MateScoreBase - mate;
-                        mateIn = mate;
-                    }
-                    break;
-
-                case "pv" when i + 1 < parts.Length:
-                    var pvParts = parts.Skip(i + 1).ToArray();
-                    pv = string.Join(" ", pvParts);
-                    if (pvParts.Length > 0) {
-                        move = pvParts[0];
-                    }
-                    break;
-            }
-        }
-
-        return new UsiInfo(multipv, depth, score, mateIn, pv, move);
-    }
-
     /// <summary>SFEN形式の指し手をパース</summary>
     public ((int col, int row)? from, (int col, int row) destination, char? dropPiece)? ParseSfenMove(string sfenMove) =>
         this._usiParser.ParseMoveCoordinates(sfenMove);
 
     #endregion
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
-        if (this.IsAvailable) {
-            await this.StopAnalysisAsync();
-        }
-        this._dotNetRef?.Dispose();
+        this._subscriptions.Dispose();
         this._evaluationUpdated.Dispose();
         GC.SuppressFinalize(this);
     }
