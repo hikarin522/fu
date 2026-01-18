@@ -65,6 +65,9 @@ public partial class ConnectionPanel : IDisposable
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender) {
+            // UserSettings を読み込む（常に最新の値を取得）
+            await this.UserSettings.LoadAsync();
+
             // 前回のニックネームを読み込む
             if (!string.IsNullOrEmpty(this.UserSettings.Nickname)) {
                 this.InputNickname = this.UserSettings.Nickname;
